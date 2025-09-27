@@ -1,10 +1,10 @@
 const express = require('express');
-
+const tenantRouter = require('./routes/tenantRoutes');
+const projectRouter = require('./routes/projectRoutes');
 const app = express();
 
-app.use('/', (req, res, next) => {
-  console.log('hello from the server');
-  next();
-});
+//routes
+app.use('/api/v1/tenants', tenantRouter);
+app.use('/api/v1/projects', projectRouter);
 
 module.exports = app;

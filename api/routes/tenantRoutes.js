@@ -1,13 +1,8 @@
 const express = require('express');
 
 const router = express.Router();
+const tenantController = require('../controllers/tenantController');
 
-//create a tenant
-router.route('/').post();
-
-// later auth for just admin
-router.route('/').get();
-
-router.route('/:id').get().patch().delete();
+router.route('/').get(tenantController.getAllTenants);
 
 module.exports = router;
