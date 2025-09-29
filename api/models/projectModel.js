@@ -16,28 +16,31 @@ const projectSchema = new mongoose.Schema(
       ref: 'Tenant',
       required: true,
     },
-    members: [
+    teamMembers: [
       {
-        name: {
-          type: String,
-          required: true,
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
         },
-        email: {
-          type: String,
-          required: true,
-          lowercase: true,
-        },
+
         role: {
           type: String,
           enum: ['owner', 'manager', 'editor', 'viewer'],
           default: 'editor',
         },
+        joinedAt: Date,
       },
     ],
+    progress: { type: Number, min: 0, max: 100, default: 0 },
     status: {
       type: String,
-      enum: ['pending', 'active', 'completed'],
+      enum: ['pending', 'planning', 'in-progress', 'completed', 'on-hold'],
       default: 'pending',
+    },
+    priority: {
+      type: String,
+      enum: ['low', 'medium', 'high', 'urgent'],
+      default: 'medium',
     },
   },
   { timestamps: true }
