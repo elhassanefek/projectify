@@ -14,6 +14,10 @@ router
   .route('/:id')
   .get(tenantController.getTenant)
   .patch(tenantController.updateTenant)
-  .delete(tenantController.deleteTenant);
+  .delete(
+    authController.protect,
+    authController.restrictTo('admin', 'manager'),
+    tenantController.deleteTenant
+  );
 
 module.exports = router;
