@@ -11,14 +11,19 @@ const projectSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
-    tenant: {
+    //parent ref
+    workSpace: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Tenant',
+      ref: 'WorkSpace',
       required: true,
+    },
+    owner: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
     },
     teamMembers: [
       {
-        user: {
+        member: {
           type: mongoose.Schema.Types.ObjectId,
           ref: 'User',
         },

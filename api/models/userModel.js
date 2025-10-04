@@ -45,11 +45,41 @@ const userSchema = new mongoose.Schema(
       enum: ['admin', 'manager', 'user'],
       default: 'user',
     },
-    tenant: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Tenant',
-      // required: [true, 'A user must belong to a tenant'],
-    },
+    workSpaces: [
+      {
+        workSpace: {
+          //parent ref
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'WorkSpace',
+        },
+        role: {
+          type: String,
+          enum: ['owner', 'admin', 'member', 'viewer'],
+          default: 'member',
+        },
+        joinedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+    projects: [
+      {
+        project: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'Project',
+        },
+        role: {
+          type: String,
+          enum: ['owner', 'lead', 'member', 'viewer'],
+          default: 'member',
+        },
+        joinedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
     isActive: {
       type: Boolean,
       default: true,
@@ -70,6 +100,16 @@ userSchema.pre('save', async function (next) {
 userSchema.pre('save', function (next) {
   if (!this.isModified('password') || this.isNew) return next();
   this.passwordChangerAt = Date.now() - 1000;
+  next();
+});
+userSchema.pre(/^find/, function (next) {
+  this.populate({
+    path: 'workSpaces.workSpace', // 👈 correct path
+    select: 'name createdAt', // adjust fields as needed
+  }).populate({
+    path: 'projects.project', // same for projects
+    select: 'name description createdAt',
+  });
   next();
 });
 userSchema.pre(/^find/, function (next) {

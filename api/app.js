@@ -5,7 +5,7 @@ const xss = require('xss-clean');
 const morgan = require('morgan');
 const hpp = require('hpp');
 const rateLimit = require('express-rate-limit');
-const tenantRouter = require('./routes/tenantRoutes');
+const workSpaceRouter = require('./routes/workSpaceRoutes');
 const projectRouter = require('./routes/projectRoutes');
 const authRouter = require('./routes/authRoutes');
 const userRouter = require('./routes/userRoutes');
@@ -20,7 +20,13 @@ if (process.env.NODE_ENV === 'development') {
 app.use(express.json({}));
 
 //data senitization against NOSQL query injection
-app.use(mongoSanitize());
+app.use(
+  mongoSanitize({
+    onSanitize: ({ key }) => {
+      console.warn(`Sanitized ${key}`);
+    },
+  })
+);
 //data  senitization against xss
 app.use(xss());
 
@@ -42,7 +48,7 @@ app.use('/api', limiter);
 //routes
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/users', userRouter);
-app.use('/api/v1/tenants', tenantRouter);
+app.use('/api/v1/workSpaces', workSpaceRouter);
 app.use('/api/v1/projects', projectRouter);
 
 app.use(globalErrorHandler);

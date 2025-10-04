@@ -12,15 +12,18 @@ const signToken = (id) => {
     expiresIn: process.env.JWT_EXPIRES_IN,
   });
 };
-const createSendToken = (user, status, res) => {
+const createSendToken = (user, statusCode, res) => {
   const token = signToken(user._id);
-  const cookieOption = {
+  const cookieOptions = {
     expires: new Date(
-      Date.now() + process.env.JWT_COOKIE_EXPIRES_IT * 24 * 60 * 60 * 1000
+      Date.now() + process.env.JWT_COOKIE_EXPIRES_IN * 24 * 60 * 60 * 1000
     ),
     httpOnly: true,
   };
-  res.cookie('jwt', token, cookieOption);
+  if (process.env.NODE_ENV === 'production') cookieOptions.secure = true;
+
+  res.cookie('jwt', token, cookieOptions);
+
   // Remove password from output
   user.password = undefined;
 
@@ -32,6 +35,7 @@ const createSendToken = (user, status, res) => {
     },
   });
 };
+
 exports.signup = catchAsync(async (req, res, next) => {
   const newUser = await User.create({
     name: req.body.name,
@@ -50,7 +54,16 @@ exports.login = catchAsync(async (req, res, next) => {
   }
 
   //2 check if the email and the password are actually correct
-  const user = await User.findOne({ email }).select('+password');
+  const user = await User.findOne({ email })
+    .select('+password')
+    .populate({
+      path: 'workSpaces',
+      select: 'name description createdAt ',
+    })
+    .populate({
+      path: 'projects',
+      select: 'name description createdAt',
+    });
 
   if (!user || !(await user.correctPassword(password, user.password))) {
     return next(new AppError('Incorrect email or password', 401));
