@@ -1,5 +1,12 @@
 const express = require('express');
 const taskController = require('../controllers/taskController');
-const router = express.Router();
+const router = express.Router({ mergeParams: true });
 
-router.get('/');
+router
+  .route('/')
+  .get(taskController.getAllTasks)
+  .post(taskController.createTask);
+
+router.route('/:id').get(taskController.getTask);
+
+module.exports = router;

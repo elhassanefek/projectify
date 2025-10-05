@@ -9,6 +9,7 @@ const workSpaceRouter = require('./routes/workSpaceRoutes');
 const projectRouter = require('./routes/projectRoutes');
 const authRouter = require('./routes/authRoutes');
 const userRouter = require('./routes/userRoutes');
+const suoperAdminRouter = require('./routes/super-adminRoutes');
 const globalErrorHandler = require('./controllers/errorContoller');
 const app = express();
 // set security http headers
@@ -47,9 +48,13 @@ const limiter = rateLimit({
 app.use('/api', limiter);
 //routes
 app.use('/api/v1/auth', authRouter);
+
 app.use('/api/v1/users', userRouter);
+
 app.use('/api/v1/workSpaces', workSpaceRouter);
+
 app.use('/api/v1/projects', projectRouter);
 
+app.use('/api/v1/super-admin', suoperAdminRouter);
 app.use(globalErrorHandler);
 module.exports = app;

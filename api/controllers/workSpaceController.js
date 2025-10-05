@@ -75,6 +75,82 @@ exports.deleteWorkSpace = catchAsync(async (req, res, next) => {
   });
 });
 
+//---------------------workSpaces belonging to a logged-in user ---------------------
+
+exports.getOwnedWorkSpaces = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user._id).populate({
+    path: 'workSpaces.workSpace',
+    select: 'name description createdAt',
+  });
+
+  if (!user) return next(new AppError('User not found', 404));
+
+  const ownedWorkSpaces = user.workSpaces
+    .filter((ws) => ws.role === 'owner')
+    .map((ws) => ws.workSpace);
+
+  res.status(200).json({
+    status: 'success',
+    results: ownedWorkSpaces.length,
+    data: {
+      ownedWorkSpaces,
+    },
+  });
+});
+
+exports.getMemberWorkSpaces = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user._id).populate({
+    path: 'workSpaces.workSpace',
+    select: 'name description createdAt',
+  });
+
+  if (!user) return next(new AppError('User not found', 404));
+
+  const memberWorkSpaces = user.workSpaces
+    .filter(
+      (ws) => ws.role === 'member' || ws.role === 'owner' || ws.role === 'admin'
+    )
+    .map((ws) => ws.workSpace);
+
+  res.status(200).json({
+    status: 'success',
+    results: memberWorkSpaces.length,
+    data: {
+      memberWorkSpaces,
+    },
+  });
+});
+
+//-------------------check authorization-----------------------------------
+
+exports.checkWorkspaceOwnership = catchAsync(async (req, res, next) => {
+  const workSpace = await WorkSpace.findById(req.params.id);
+  if (!workSpace) {
+    return next(new AppError('No wrokSpace found with this ID', 404));
+  }
+
+  if (workSpace.canManage(req.user.id)) {
+    req.workSpace = workSpace;
+    return next();
+  }
+  return next(
+    new AppError('You do not have permisson to perform this action!', 403)
+  );
+});
+
+exports.checkworkspaceMembership = catchAsync(async (req, res, next) => {
+  const workSpace = await WorkSpace.findById(req.params.id);
+
+  if (!workSpace) {
+    return next(new AppError('No workSpace with this ID', 404));
+  }
+  if (workSpace.isMember(req.user.id)) {
+    req.workSpace = workSpace;
+    return next();
+  }
+  return next(new AppError('You are not a member in this workSpace', 403));
+});
+
 //...............................workSpaces Stats......................................//
 
 exports.getTotalWorkSpaces = catchAsync(async (req, res, next) => {

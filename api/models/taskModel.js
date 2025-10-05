@@ -44,7 +44,7 @@ const taskSchema = new mongoose.Schema(
     toObject: { virtuals: true },
   }
 );
-
+//virtual populate
 taskSchema.virtual('comments', {
   ref: 'Comment',
   foreignField: 'task',
@@ -53,4 +53,4 @@ taskSchema.virtual('comments', {
 
 const Task = mongoose.model('Task', taskSchema);
 
-model.exports = Task;
+module.exports = Task;

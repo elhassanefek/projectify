@@ -3,7 +3,9 @@ const catchAsync = require('../utils/catchAsync');
 const AppError = require('./../utils/appErrors');
 
 exports.getAllProjects = catchAsync(async (req, res, next) => {
-  const projects = await Project.find();
+  let filter = {};
+  if (req.params.workSpaceId) filter = { workSpace: req.params.workSpaceId };
+  const projects = await Project.find(filter);
   res.status(200).json({
     status: 'success',
     data: projects,
@@ -11,6 +13,9 @@ exports.getAllProjects = catchAsync(async (req, res, next) => {
 });
 
 exports.createProject = catchAsync(async (req, res, next) => {
+  //Allow nested routes
+  if (!req.body.workSpace) req.body.workSpace = req.params.workSpaceId;
+  if (!req.body.user) req.body.user = req.user.id;
   const newProject = await Project.create(req.body);
   res.status(201).json({
     status: 'success',
