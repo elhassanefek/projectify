@@ -102,16 +102,16 @@ userSchema.pre('save', function (next) {
   this.passwordChangerAt = Date.now() - 1000;
   next();
 });
-userSchema.pre(/^find/, function (next) {
-  this.populate({
-    path: 'workSpaces.workSpace', // 👈 correct path
-    select: 'name createdAt', // adjust fields as needed
-  }).populate({
-    path: 'projects.project', // same for projects
-    select: 'name description createdAt',
-  });
-  next();
-});
+// userSchema.pre(/^find/, function (next) {
+//   this.populate({
+//     path: 'workSpaces.workSpace', // 👈 correct path
+//     select: 'name createdAt', // adjust fields as needed
+//   }).populate({
+//     path: 'projects.project', // same for projects
+//     select: 'name description createdAt',
+//   });
+//   next();
+// });
 userSchema.pre(/^find/, function (next) {
   // this points to the current query
   this.find({ isActive: { $ne: false } });

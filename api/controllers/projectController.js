@@ -1,6 +1,7 @@
 const Project = require('../models/projectModel');
+const WorkSpace = require('../models/workSpaceModel');
 const catchAsync = require('../utils/catchAsync');
-const AppError = require('./../utils/appErrors');
+const AppError = require('../utils/appError');
 
 exports.getAllProjects = catchAsync(async (req, res, next) => {
   let filter = {};
@@ -15,8 +16,16 @@ exports.getAllProjects = catchAsync(async (req, res, next) => {
 exports.createProject = catchAsync(async (req, res, next) => {
   //Allow nested routes
   if (!req.body.workSpace) req.body.workSpace = req.params.workSpaceId;
-  if (!req.body.user) req.body.user = req.user.id;
+  if (!req.body.user) req.body.owner = req.user._id;
+
   const newProject = await Project.create(req.body);
+
+  // Add the new project's ID to the corresponding WorkSpace's projects array
+  await WorkSpace.findByIdAndUpdate(
+    newProject.workSpace,
+    { $push: { projects: newProject._id } },
+    { new: true }
+  );
   res.status(201).json({
     status: 'success',
     data: {

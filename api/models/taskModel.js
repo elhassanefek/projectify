@@ -23,20 +23,29 @@ const taskSchema = new mongoose.Schema(
     },
     dueDate: Date,
 
-    //relations
-
+    // Relations
     project: {
       type: mongoose.Schema.Types.ObjectId,
-      red: 'Project',
+      ref: 'Project',
       required: true,
     },
+
+    groupId: {
+      type: String,
+      required: [true, 'A task must belong to a group'],
+    },
+
     assignedTo: [
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
       },
     ],
-    //commnents will be virtual
+
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
   },
   {
     timestamps: true,
@@ -44,7 +53,8 @@ const taskSchema = new mongoose.Schema(
     toObject: { virtuals: true },
   }
 );
-//virtual populate
+
+// Virtual populate for comments
 taskSchema.virtual('comments', {
   ref: 'Comment',
   foreignField: 'task',
@@ -52,5 +62,4 @@ taskSchema.virtual('comments', {
 });
 
 const Task = mongoose.model('Task', taskSchema);
-
 module.exports = Task;

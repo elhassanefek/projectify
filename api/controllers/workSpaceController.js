@@ -2,7 +2,7 @@ const WorkSpace = require('../models/workSpaceModel');
 const User = require('../models/userModel');
 
 const catchAsync = require('./../utils/catchAsync');
-const AppError = require('./../utils/appErrors');
+const AppError = require('./../utils/appError');
 
 //............................CRUD OPS for the workSpaces........................................//
 exports.getAllWorkSpaces = catchAsync(async (req, res) => {
