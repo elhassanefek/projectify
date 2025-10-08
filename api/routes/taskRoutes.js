@@ -13,4 +13,5 @@ router
 
 router.route('/:id').get(taskController.getTask);
 
+router.get('/stats/by-user', taskController.getTasksByUser);
 module.exports = router;

@@ -122,9 +122,11 @@ const projectSchema = new mongoose.Schema(
       default: null,
     },
   },
-  { timestamps: true }
+  { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
-
+projectSchema.virtual('totalGroups').get(function () {
+  return this.groups.length;
+});
 projectSchema.pre('save', function (next) {
   if (this.isNew && this.owner) {
     this.teamMembers.push({

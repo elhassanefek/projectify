@@ -1,13 +1,10 @@
-const Task = require('../models/taskModel');
-const Project = require('../models/projectModel');
+const TaskService = require('../services/taskService');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 
-// Get all tasks (optionally filtered by project)
+// ------------------ Get all tasks ------------------
 exports.getAllTasks = catchAsync(async (req, res, next) => {
-  const filter = {};
-  if (req.params.projectId) filter.project = req.params.projectId;
-  const tasks = await Task.find(filter);
+  const tasks = await TaskService.getAllTasks(req.params.projectId);
 
   res.status(200).json({
     status: 'success',
@@ -16,9 +13,10 @@ exports.getAllTasks = catchAsync(async (req, res, next) => {
   });
 });
 
-// Get a single task
+// ------------------ Get single task ------------------
 exports.getTask = catchAsync(async (req, res, next) => {
-  const task = await Task.findById(req.params.id).populate('comments');
+  const task = await TaskService.getTaskById(req.params.id);
+
   if (!task) return next(new AppError('No task found with this ID', 404));
 
   res.status(200).json({
@@ -27,30 +25,16 @@ exports.getTask = catchAsync(async (req, res, next) => {
   });
 });
 
-// Create a new task
+// ------------------ Create new task ------------------
 exports.createTask = catchAsync(async (req, res, next) => {
   const { projectId } = req.params;
+  const userId = req.user._id;
 
-  // Ensure the project exists
-  const project = await Project.findById(projectId);
-  if (!project) return next(new AppError('Project not found', 404));
-
-  // Validate groupId
-  const { groupId } = req.body;
-  const groupExists = project.groups.some((g) => g.id === groupId);
-  if (!groupExists) {
-    return next(
-      new AppError('Invalid groupId — group not found in project', 400)
-    );
-  }
-
-  // Set project and creator fields automatically
-  req.body.project = projectId;
-  req.body.createdBy = req.user._id;
-  if (!req.body.groupId && project.groups.length > 0) {
-    req.body.groupId = project.groups[0].id; // "To Do"
-  }
-  const newTask = await Task.create(req.body);
+  const newTask = await TaskService.createTask({
+    ...req.body,
+    projectId,
+    userId,
+  });
 
   res.status(201).json({
     status: 'success',
@@ -58,23 +42,56 @@ exports.createTask = catchAsync(async (req, res, next) => {
   });
 });
 
+// ------------------ Update task ------------------
 exports.updateTask = catchAsync(async (req, res, next) => {
-  const task = await Task.findByIdAndUpdate(req.params.id, req.body, {
-    new: true,
-    runValidators: true,
-  });
-  if (!task) return next(new AppError('Task not found', 404));
+  const updatedTask = await TaskService.updateTask(req.params.id, req.body);
+
+  if (!updatedTask) return next(new AppError('Task not found', 404));
 
   res.status(200).json({
     status: 'success',
-    data: { task },
+    data: { task: updatedTask },
   });
 });
 
+// ------------------ Get tasks by project ------------------
 exports.getTasksByProject = catchAsync(async (req, res, next) => {
-  const tasks = await Task.find({ project: req.params.projectId });
+  const tasks = await TaskService.getTasksByProject(req.params.projectId);
+
   res.status(200).json({
     status: 'success',
+    results: tasks.length,
     data: { tasks },
+  });
+});
+
+// ------------------ Task statistics ------------------
+exports.getTaskStats = catchAsync(async (req, res, next) => {
+  const stats = await TaskService.getTaskStats(req.params.projectId);
+
+  res.status(200).json({
+    status: 'success',
+    data: stats,
+  });
+});
+
+// ------------------ Tasks grouped by groupId ------------------
+exports.getTasksByGroup = catchAsync(async (req, res, next) => {
+  const result = await TaskService.getTasksByGroup(req.params.projectId);
+
+  res.status(200).json({
+    status: 'success',
+    data: result,
+  });
+});
+
+// ------------------ Tasks grouped by user ------------------
+exports.getTasksByUser = catchAsync(async (req, res, next) => {
+  const result = await TaskService.getTasksByUser(req.params.projectId);
+
+  res.status(200).json({
+    status: 'success',
+    results: result.length,
+    data: { tasksByUser: result },
   });
 });

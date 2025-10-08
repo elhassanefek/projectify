@@ -53,7 +53,13 @@ const taskSchema = new mongoose.Schema(
     toObject: { virtuals: true },
   }
 );
-
+//indexes
+taskSchema.index({ project: 1 });
+taskSchema.index({ groupId: 1 });
+taskSchema.index({ status: 1 });
+taskSchema.index({ priority: 1 });
+taskSchema.index({ dueDate: 1 });
+taskSchema.index({ assignedTo: 1 });
 // Virtual populate for comments
 taskSchema.virtual('comments', {
   ref: 'Comment',
