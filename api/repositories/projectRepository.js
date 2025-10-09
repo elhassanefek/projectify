@@ -1,7 +1,7 @@
 const Project = require('../models/projectModel');
-const workSpace = require('../models/workSpaceModel');
-const User = require('../models/userModel');
 const WorkSpace = require('../models/workSpaceModel');
+const User = require('../models/userModel');
+
 class ProjectRepository {
   async create(data) {
     return await Project.create(data);
