@@ -2,7 +2,7 @@ const express = require('express');
 
 const projectController = require('../controllers/projectController');
 const authController = require('./../controllers/authController');
-const taskRouter = require('../routes/taskRoutes');
+const taskRouter = require('./taskRoutes');
 const groupRouter = require('./groupRoutes');
 const router = express.Router({ mergeParams: true });
 

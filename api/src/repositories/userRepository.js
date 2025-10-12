@@ -2,7 +2,8 @@ const User = require('../models/userModel');
 
 class UserRepository {
   async findAll() {
-    return User.find().populate('workSpaces.workSpace');
+    // return User.find().populate('workSpaces.workSpace');
+    return User.find();
   }
 
   async findById(id) {
@@ -25,11 +26,14 @@ class UserRepository {
   }
 
   async softDelete(id) {
-    return User.findByIdAndUpdate(id, { active: false });
+    return User.findByIdAndUpdate(id, { isActive: false });
   }
 
   async deleteById(id) {
     return User.findByIdAndDelete(id);
+  }
+  async findByIdWithPassword(id) {
+    return User.findById(id).select('+password');
   }
 }
 

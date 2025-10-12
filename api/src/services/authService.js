@@ -1,8 +1,7 @@
 const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
 const sendEmail = require('../utils/email');
-const userRepository = require('../repositories/userRepository');
 const AppError = require('../utils/appError');
+const userRepository = require('../repositories/userRepository');
 
 class AuthService {
   signToken(id) {
@@ -13,6 +12,7 @@ class AuthService {
 
   async createSendToken(user, statusCode, res) {
     const token = this.signToken(user._id);
+
     const cookieOptions = {
       expires: new Date(
         Date.now() + process.env.JWT_COOKIE_EXPIRES_IN * 24 * 60 * 60 * 1000
@@ -32,16 +32,30 @@ class AuthService {
   }
 
   async sendPasswordResetEmail(user, resetToken, req) {
-    const resetURL = `${req.protocol}://${req.get(
-      'host'
-    )}/api/v1/auth/resetPassword/${resetToken}`;
-    const message = `Forgot your password? Send a PATCH with your new password and passwordConfirm to: ${resetURL}.\nIf you didn’t request this, ignore this email.`;
+    try {
+      const resetURL = `${req.protocol}://${req.get(
+        'host'
+      )}/api/v1/auth/resetPassword/${resetToken}`;
+      const message = `Forgot your password? Send a PATCH with your new password and passwordConfirm to: ${resetURL}.\nIf you didn’t request this, ignore this email.`;
 
-    await sendEmail({
-      email: user.email,
-      subject: 'Your password reset token (valid for 10 min)',
-      message,
-    });
+      await sendEmail({
+        email: user.email,
+        subject: 'Your password reset token (valid for 10 min)',
+        message,
+      });
+    } catch (err) {
+      user.passwordResetToken = undefined;
+      user.passwordResetExpires = undefined;
+      await user.save({ validateBeforeSave: false });
+      throw new AppError(
+        'There was an error sending the email. Try again later!',
+        500
+      );
+    }
+  }
+
+  async verifyToken(token) {
+    return jwt.verify(token, process.env.JWT_SECRET);
   }
 }
 

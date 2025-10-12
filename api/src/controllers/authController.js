@@ -32,6 +32,9 @@ exports.login = catchAsync(async (req, res, next) => {
   if (!user || !(await user.correctPassword(password, user.password))) {
     return next(new AppError('Incorrect email or password', 401));
   }
+  if (!user.isActive) {
+    return next(new AppError('user is not active', 401));
+  }
 
   await authService.createSendToken(user, 200, res);
 });
@@ -135,8 +138,8 @@ exports.resetPassword = catchAsync(async (req, res, next) => {
 });
 
 exports.updatePassword = catchAsync(async (req, res, next) => {
-  const user = await userRepository.findById(req.user.id).select('+password');
-
+  const user = await userRepository.findByIdWithPassword(req.user.id);
+  if (!user) return next(new AppError('User not found.', 404));
   if (!(await user.correctPassword(req.body.passwordCurrent, user.password))) {
     return next(new AppError('Your current password is wrong.', 401));
   }

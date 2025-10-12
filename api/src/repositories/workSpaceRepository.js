@@ -22,7 +22,7 @@ class WorkSpaceRepository {
   async delete(filter) {
     return await WorkSpace.deleteOne(filter);
   }
-  async deleteById() {
+  async deleteById(id) {
     return await WorkSpace.findByIdAndDelete(id);
   }
   async count() {

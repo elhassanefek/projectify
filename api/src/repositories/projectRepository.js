@@ -7,7 +7,7 @@ class ProjectRepository {
     return await Project.create(data);
   }
 
-  async find(filter) {
+  async findAll(filter) {
     return await Project.find(filter);
   }
 

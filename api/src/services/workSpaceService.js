@@ -38,34 +38,35 @@ class WorkSpaceService {
   async deleteWorkSpace(id) {
     const workSpace = await workSpaceRepository.deleteById(id);
     if (!workSpace) throw new AppError('No workSpace found with that ID', 404);
-    return workSpace;
+
+    // Remove workspace from all users' workSpaces arrays
+    await User.updateMany(
+      { 'workSpaces.workSpace': id },
+      { $pull: { workSpaces: { workSpace: id } } }
+    );
   }
 
   async getOwnedWorkSpaces(userId) {
-    const user = await User.findById(userId).populate({
-      path: 'workSpaces.workSpace',
-      select: 'name description createdAt',
+    // Query workspaces directly where user is the creator
+    return await workSpaceRepository.find({
+      createdBy: userId,
     });
-    if (!user) throw new AppError('User not found', 404);
-
-    return user.workSpaces
-      .filter((ws) => ws.role === 'owner')
-      .map((ws) => ws.workSpace);
   }
 
   async getMemberWorkSpaces(userId) {
-    const user = await User.findById(userId).populate({
-      path: 'workSpaces.workSpace',
-      select: 'name description createdAt',
-    });
+    const user = await User.findById(userId);
     if (!user) throw new AppError('User not found', 404);
 
-    return user.workSpaces
+    const workspaceIds = user.workSpaces
       .filter(
         (ws) =>
           ws.role === 'member' || ws.role === 'owner' || ws.role === 'admin'
       )
       .map((ws) => ws.workSpace);
+
+    return await workSpaceRepository.find({
+      _id: { $in: workspaceIds },
+    });
   }
 
   async checkWorkspaceOwnership(workSpaceId, userId) {

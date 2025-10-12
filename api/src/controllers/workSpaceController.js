@@ -17,6 +17,7 @@ exports.createWorkSpace = catchAsync(async (req, res) => {
     req.body,
     req.user._id
   );
+
   res.status(201).json({ status: 'success', data: { workSpace } });
 });
 
@@ -35,6 +36,7 @@ exports.deleteWorkSpace = catchAsync(async (req, res) => {
 
 exports.getOwnedWorkSpaces = catchAsync(async (req, res) => {
   const owned = await workSpaceService.getOwnedWorkSpaces(req.user._id);
+
   res.status(200).json({
     status: 'success',
     results: owned.length,
@@ -54,8 +56,9 @@ exports.getMemberWorkSpaces = catchAsync(async (req, res) => {
 exports.checkWorkspaceOwnership = catchAsync(async (req, res, next) => {
   req.workSpace = await workSpaceService.checkWorkspaceOwnership(
     req.params.id,
-    req.user.id
+    req.user._id
   );
+  console.log(req.workSpace);
   next();
 });
 
@@ -76,22 +79,18 @@ exports.getWorkSpacesUsersStats = catchAsync(async (req, res) => {
   const stats = await workSpaceService.getWorkSpacesUsersStats(
     req.params.workSpaceId
   );
-  res
-    .status(200)
-    .json({
-      status: 'success',
-      data: { workSpaceId: req.params.workSpaceId, stats },
-    });
+  res.status(200).json({
+    status: 'success',
+    data: { workSpaceId: req.params.workSpaceId, stats },
+  });
 });
 
 exports.getWorkSpaceUsersActiveStats = catchAsync(async (req, res) => {
   const stats = await workSpaceService.getWorkSpaceUsersActiveStats(
     req.params.workSpaceId
   );
-  res
-    .status(200)
-    .json({
-      status: 'success',
-      data: { workSpaceId: req.params.workSpaceId, stats },
-    });
+  res.status(200).json({
+    status: 'success',
+    data: { workSpaceId: req.params.workSpaceId, stats },
+  });
 });

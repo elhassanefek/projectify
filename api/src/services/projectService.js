@@ -37,7 +37,7 @@ class ProjectService {
   }
 
   async deleteProject(id) {
-    const project = await projectRepository.delete(id);
+    const project = await projectRepository.deleteById(id);
     if (!project) throw new AppError('No project found with this ID', 404);
     return project;
   }
