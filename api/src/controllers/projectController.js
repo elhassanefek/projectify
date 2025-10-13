@@ -2,7 +2,10 @@ const catchAsync = require('../utils/catchAsync');
 const projectService = require('../services/projectService');
 
 exports.getAllProjects = catchAsync(async (req, res, next) => {
-  const projects = await projectService.getAllProjects(req.params.workSpaceId);
+  const projects = await projectService.getAllProjects(
+    req.params.workSpaceId,
+    req.query
+  );
 
   res.status(200).json({ status: 'success', data: { projects } });
 });

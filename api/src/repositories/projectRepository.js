@@ -1,14 +1,22 @@
 const Project = require('../models/projectModel');
 const WorkSpace = require('../models/workSpaceModel');
 const User = require('../models/userModel');
+const APIFeatures = require('../utils/apiFeatures');
 
 class ProjectRepository {
   async create(data) {
     return await Project.create(data);
   }
 
-  async findAll(filter) {
-    return await Project.find(filter);
+  async findAll(filter = {}, queryParams = {}) {
+    let query = Project.find(filter);
+    const features = new APIFeatures(query, queryParams)
+      .filter()
+      .sort()
+      .limitFields()
+      .paginate();
+
+    return await features.query;
   }
 
   async findById(id, populate = []) {

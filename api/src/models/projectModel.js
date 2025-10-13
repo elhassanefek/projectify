@@ -125,7 +125,7 @@ const projectSchema = new mongoose.Schema(
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
 projectSchema.virtual('totalGroups').get(function () {
-  return this.groups.length;
+  return this.groups ? this.groups.length : 0;
 });
 projectSchema.pre('save', function (next) {
   if (this.isNew && this.owner) {

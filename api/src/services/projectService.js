@@ -3,9 +3,9 @@ const workSpaceService = require('../services/workSpaceService');
 const AppError = require('../utils/appError');
 
 class ProjectService {
-  async getAllProjects(workSpaceId) {
+  async getAllProjects(workSpaceId, queryParams) {
     const filter = workSpaceId ? { workSpace: workSpaceId } : {};
-    return await projectRepository.findAll(filter);
+    return await projectRepository.findAll(filter, queryParams);
   }
 
   async createProject(data, userId) {
