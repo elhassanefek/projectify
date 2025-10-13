@@ -13,6 +13,7 @@ class ProjectService {
 
     // Assign owner if not already set
     if (!data.owner) data.owner = userId;
+
     const exists = await workSpaceService.checkExistance(data.workSpace);
 
     if (!exists) {

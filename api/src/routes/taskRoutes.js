@@ -1,8 +1,10 @@
 const express = require('express');
 const taskController = require('../controllers/taskController');
 const authController = require('../controllers/authController');
-
+const commentRouter = require('../routes/commentRoutes');
 const router = express.Router({ mergeParams: true });
+
+router.use('/:taskId/comments', commentRouter);
 
 router.use(authController.protect);
 

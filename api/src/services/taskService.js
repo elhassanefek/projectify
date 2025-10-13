@@ -9,6 +9,9 @@ class TaskService {
     const filter = projectId ? { project: projectId } : {};
     return await TaskRepository.find(filter);
   }
+  async checkExistance(id) {
+    return await TaskRepository.findById(id);
+  }
 
   // Get single task
   async getTaskById(id) {

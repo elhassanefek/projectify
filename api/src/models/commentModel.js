@@ -36,7 +36,9 @@ const commentSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
-
+commentSchema.methods.canEdit = function (userId) {
+  return this.user._id.toString() === userId.toString();
+};
 const Comment = mongoose.model('Comment', commentSchema);
 
 module.exports = Comment;
