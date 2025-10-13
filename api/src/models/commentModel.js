@@ -37,7 +37,12 @@ const commentSchema = new mongoose.Schema(
   }
 );
 commentSchema.methods.canEdit = function (userId) {
-  return this.user._id.toString() === userId.toString();
+  const commentUserId =
+    typeof this.user === 'object' && this.user !== null
+      ? this.user._id?.toString()
+      : this.user?.toString();
+
+  return commentUserId === userId.toString();
 };
 const Comment = mongoose.model('Comment', commentSchema);
 

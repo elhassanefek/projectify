@@ -4,7 +4,7 @@ const AppError = require('../utils/appError');
 
 // ------------------ Get all tasks ------------------
 exports.getAllTasks = catchAsync(async (req, res, next) => {
-  const tasks = await TaskService.getAllTasks(req.params.projectId);
+  const tasks = await TaskService.getAllTasks(req.params.projectId, req.query);
 
   res.status(200).json({
     status: 'success',

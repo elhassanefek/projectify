@@ -6,7 +6,7 @@ const express = require('express');
 // const hpp = require('hpp');
 // const rateLimit = require('express-rate-limit');
 const workSpaceRouter = require('./routes/workSpaceRoutes');
-// const projectRouter = require('./routes/projectRoutes');
+
 const userRouter = require('./routes/userRoutes');
 // const superAdminRouter = require('./routes/super-adminRoutes');
 const globalErrorHandler = require('./controllers/errorContoller');
@@ -52,15 +52,10 @@ app.use(express.json({}));
 // Routes
 app.use('/api/v1/users', userRouter);
 app.use('/api/v1/workSpaces', workSpaceRouter);
-// app.use('/api/v1/projects', projectRouter);
+
 // app.use('/api/v1/super-admin', superAdminRouter);
 
 // Global error handler
 app.use(globalErrorHandler);
-
-// IMPORTANT: DO NOT connect to database here!
-// Database connection is handled in:
-// - server.js for production/development
-// - testDbHelper.js for testing
 
 module.exports = app;

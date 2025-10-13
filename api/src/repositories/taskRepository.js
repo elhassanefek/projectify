@@ -1,8 +1,24 @@
+// src/repositories/taskRepository.js
 const Task = require('../models/taskModel');
+const APIFeatures = require('../utils/apiFeatures');
 require('../models/commentModel');
+
 class TaskRepository {
   async create(data) {
     return await Task.create(data);
+  }
+
+  //  Enhanced findAll with APIFeatures
+  async findAll(filter = {}, queryParams = {}) {
+    let query = Task.find(filter);
+
+    const features = new APIFeatures(query, queryParams)
+      .filter()
+      .sort()
+      .limitFields()
+      .paginate();
+
+    return await features.query;
   }
 
   async find(filter) {

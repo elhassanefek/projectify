@@ -246,7 +246,7 @@ describe("Task API (Nested under Workspace > Project)", () => {
   });
 
   // ═══════════════════════════════════════════════════════════
-  // READ TESTS
+  // READ TESTS (Basic)
   // ═══════════════════════════════════════════════════════════
   describe("GET /api/v1/workspaces/:workSpaceId/projects/:projectId/tasks", () => {
     beforeEach(async () => {
@@ -359,6 +359,708 @@ describe("Task API (Nested under Workspace > Project)", () => {
         .expect(200);
 
       expect(res.body.data.tasks).toEqual([]);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  // FILTERING TESTS
+  // ═══════════════════════════════════════════════════════════
+  describe("GET /api/v1/workspaces/:workSpaceId/projects/:projectId/tasks - Filtering", () => {
+    beforeEach(async () => {
+      // Create diverse tasks for filtering tests
+      await request(app)
+        .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          title: "High Priority Todo",
+          status: "todo",
+          priority: "high",
+        });
+
+      await request(app)
+        .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          title: "High Priority In Progress",
+          status: "in-progress",
+          priority: "high",
+        });
+
+      await request(app)
+        .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          title: "Medium Priority Done",
+          status: "done",
+          priority: "medium",
+        });
+
+      await request(app)
+        .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          title: "Low Priority Todo",
+          status: "todo",
+          priority: "low",
+        });
+
+      await request(app)
+        .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          title: "Assigned Task",
+          status: "in-progress",
+          priority: "medium",
+          assignedTo: [userId],
+        });
+    });
+
+    it("should filter tasks by status", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?status=todo`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBe(2);
+      res.body.data.tasks.forEach((task) => {
+        expect(task.status).toBe("todo");
+      });
+    });
+
+    it("should filter tasks by priority", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?priority=high`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBe(2);
+      res.body.data.tasks.forEach((task) => {
+        expect(task.priority).toBe("high");
+      });
+    });
+
+    it("should filter tasks by multiple criteria (status AND priority)", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?status=in-progress&priority=high`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBe(1);
+      expect(res.body.data.tasks[0].status).toBe("in-progress");
+      expect(res.body.data.tasks[0].priority).toBe("high");
+    });
+
+    it("should filter tasks by assignedTo", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?assignedTo=${userId}`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBeGreaterThanOrEqual(1);
+      res.body.data.tasks.forEach((task) => {
+        expect(task.assignedTo).toContain(userId);
+      });
+    });
+
+    it("should return empty array when filter matches no tasks", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?status=cancelled`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks).toEqual([]);
+    });
+
+    it("should handle invalid filter values gracefully", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?status=invalid-status`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks).toEqual([]);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  // ADVANCED FILTERING (gte, gt, lte, lt)
+  // ═══════════════════════════════════════════════════════════
+  describe("GET /api/v1/workspaces/:workSpaceId/projects/:projectId/tasks - Advanced Filtering", () => {
+    let earlyDate, midDate, lateDate;
+
+    beforeEach(async () => {
+      earlyDate = new Date("2025-11-01");
+      midDate = new Date("2025-11-15");
+      lateDate = new Date("2025-11-30");
+
+      // Create tasks with different due dates
+      await request(app)
+        .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          title: "Early Task",
+          dueDate: earlyDate.toISOString(),
+          priority: "high",
+        });
+
+      await request(app)
+        .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          title: "Mid Task",
+          dueDate: midDate.toISOString(),
+          priority: "medium",
+        });
+
+      await request(app)
+        .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          title: "Late Task",
+          dueDate: lateDate.toISOString(),
+          priority: "low",
+        });
+    });
+
+    it("should filter tasks with dueDate greater than or equal (gte)", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?dueDate[gte]=${midDate.toISOString()}`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBeGreaterThanOrEqual(2);
+      res.body.data.tasks.forEach((task) => {
+        expect(new Date(task.dueDate).getTime()).toBeGreaterThanOrEqual(
+          midDate.getTime()
+        );
+      });
+    });
+
+    it("should filter tasks with dueDate greater than (gt)", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?dueDate[gt]=${midDate.toISOString()}`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBeGreaterThanOrEqual(1);
+      res.body.data.tasks.forEach((task) => {
+        expect(new Date(task.dueDate).getTime()).toBeGreaterThan(
+          midDate.getTime()
+        );
+      });
+    });
+
+    it("should filter tasks with dueDate less than or equal (lte)", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?dueDate[lte]=${midDate.toISOString()}`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBeGreaterThanOrEqual(2);
+      res.body.data.tasks.forEach((task) => {
+        expect(new Date(task.dueDate).getTime()).toBeLessThanOrEqual(
+          midDate.getTime()
+        );
+      });
+    });
+
+    it("should filter tasks with dueDate less than (lt)", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?dueDate[lt]=${midDate.toISOString()}`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBeGreaterThanOrEqual(1);
+      res.body.data.tasks.forEach((task) => {
+        expect(new Date(task.dueDate).getTime()).toBeLessThan(
+          midDate.getTime()
+        );
+      });
+    });
+
+    it("should filter tasks with date range (gte and lte)", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?dueDate[gte]=${earlyDate.toISOString()}&dueDate[lte]=${midDate.toISOString()}`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBeGreaterThanOrEqual(2);
+      res.body.data.tasks.forEach((task) => {
+        const taskDate = new Date(task.dueDate).getTime();
+        expect(taskDate).toBeGreaterThanOrEqual(earlyDate.getTime());
+        expect(taskDate).toBeLessThanOrEqual(midDate.getTime());
+      });
+    });
+
+    it("should combine advanced filters with regular filters", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?dueDate[gte]=${earlyDate.toISOString()}&priority=high`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      res.body.data.tasks.forEach((task) => {
+        expect(new Date(task.dueDate).getTime()).toBeGreaterThanOrEqual(
+          earlyDate.getTime()
+        );
+        expect(task.priority).toBe("high");
+      });
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  // DEFAULT BEHAVIOR TESTS
+  // ═══════════════════════════════════════════════════════════
+  describe("GET /api/v1/workspaces/:workSpaceId/projects/:projectId/tasks - Default Behavior", () => {
+    beforeEach(async () => {
+      await request(app)
+        .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({ title: "First Task" });
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      await request(app)
+        .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({ title: "Second Task" });
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      await request(app)
+        .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({ title: "Third Task" });
+    });
+
+    it("should sort by -createdAt by default (newest first)", async () => {
+      const res = await request(app)
+        .get(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks[0].title).toBe("Third Task");
+      expect(res.body.data.tasks[2].title).toBe("First Task");
+    });
+
+    it("should exclude __v field by default", async () => {
+      const res = await request(app)
+        .get(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      res.body.data.tasks.forEach((task) => {
+        expect(task.__v).toBeUndefined();
+      });
+    });
+
+    it("should apply default limit of 100 tasks", async () => {
+      const res = await request(app)
+        .get(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBeLessThanOrEqual(100);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  // SORTING TESTS
+  // ═══════════════════════════════════════════════════════════
+  describe("GET /api/v1/workspaces/:workSpaceId/projects/:projectId/tasks - Sorting", () => {
+    beforeEach(async () => {
+      // Create tasks with varying dates and priorities
+      await request(app)
+        .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          title: "Zebra Task",
+          priority: "low",
+          dueDate: new Date("2025-12-31").toISOString(),
+        });
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      await request(app)
+        .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          title: "Alpha Task",
+          priority: "high",
+          dueDate: new Date("2025-11-01").toISOString(),
+        });
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      await request(app)
+        .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          title: "Beta Task",
+          priority: "medium",
+          dueDate: new Date("2025-10-15").toISOString(),
+        });
+    });
+
+    it("should sort tasks by title ascending", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?sort=title`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks[0].title).toBe("Alpha Task");
+      expect(res.body.data.tasks[1].title).toBe("Beta Task");
+      expect(res.body.data.tasks[2].title).toBe("Zebra Task");
+    });
+
+    it("should sort tasks by title descending", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?sort=-title`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks[0].title).toBe("Zebra Task");
+      expect(res.body.data.tasks[1].title).toBe("Beta Task");
+      expect(res.body.data.tasks[2].title).toBe("Alpha Task");
+    });
+
+    it("should sort tasks by createdAt ascending (oldest first)", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?sort=createdAt`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks[0].title).toBe("Zebra Task");
+      expect(res.body.data.tasks[2].title).toBe("Beta Task");
+    });
+
+    it("should sort tasks by createdAt descending (newest first)", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?sort=-createdAt`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks[0].title).toBe("Beta Task");
+      expect(res.body.data.tasks[2].title).toBe("Zebra Task");
+    });
+
+    it("should sort tasks by dueDate ascending", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?sort=dueDate`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks[0].title).toBe("Beta Task");
+      expect(res.body.data.tasks[1].title).toBe("Alpha Task");
+      expect(res.body.data.tasks[2].title).toBe("Zebra Task");
+    });
+
+    it("should sort tasks by dueDate descending", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?sort=-dueDate`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks[0].title).toBe("Zebra Task");
+      expect(res.body.data.tasks[2].title).toBe("Beta Task");
+    });
+
+    it("should sort by multiple fields (priority, then title)", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?sort=title`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBe(3);
+      // Verify tasks are sorted alphabetically by title
+      expect(res.body.data.tasks[0].title).toBe("Alpha Task");
+      expect(res.body.data.tasks[1].title).toBe("Beta Task");
+      expect(res.body.data.tasks[2].title).toBe("Zebra Task");
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  // PAGINATION TESTS
+  // ═══════════════════════════════════════════════════════════
+  describe("GET /api/v1/workspaces/:workSpaceId/projects/:projectId/tasks - Pagination", () => {
+    beforeEach(async () => {
+      // Create 15 tasks for pagination testing
+      const taskPromises = [];
+      for (let i = 1; i <= 15; i++) {
+        taskPromises.push(
+          request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+              title: `Task ${i.toString().padStart(2, "0")}`,
+              description: `Description for task ${i}`,
+              priority: i % 3 === 0 ? "high" : i % 2 === 0 ? "medium" : "low",
+            })
+        );
+      }
+      await Promise.all(taskPromises);
+    });
+
+    it("should return default number of tasks per page", async () => {
+      const res = await request(app)
+        .get(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      // Assuming default is 10 or all tasks if no limit
+      expect(res.body.data.tasks.length).toBeGreaterThan(0);
+      expect(res.body.data.tasks.length).toBeLessThanOrEqual(15);
+    });
+
+    it("should limit tasks per page", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?limit=5`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBe(5);
+    });
+
+    it("should paginate to second page", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?page=2&limit=5`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBe(5);
+    });
+
+    it("should paginate to third page", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?page=3&limit=5`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBe(5);
+    });
+
+    it("should return remaining tasks on last page", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?page=4&limit=5`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBeLessThanOrEqual(5);
+    });
+
+    it("should return empty array for page beyond available data", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?page=100&limit=5`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks).toEqual([]);
+    });
+
+    it("should handle invalid page number gracefully", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?page=0&limit=5`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(Array.isArray(res.body.data.tasks)).toBe(true);
+    });
+
+    it("should handle invalid limit gracefully", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?limit=-5`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(Array.isArray(res.body.data.tasks)).toBe(true);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  // FIELD SELECTION TESTS
+  // ═══════════════════════════════════════════════════════════
+  describe("GET /api/v1/workspaces/:workSpaceId/projects/:projectId/tasks - Field Selection", () => {
+    beforeEach(async () => {
+      await request(app)
+        .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          title: "Full Task",
+          description: "Complete task with all fields",
+          status: "todo",
+          priority: "high",
+        });
+    });
+
+    it("should select only specified fields", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?fields=title,status`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks[0]).toHaveProperty("title");
+      expect(res.body.data.tasks[0]).toHaveProperty("status");
+      expect(res.body.data.tasks[0]).toHaveProperty("_id");
+      // Description should not be present
+      expect(res.body.data.tasks[0].description).toBeUndefined();
+    });
+
+    it("should exclude specified fields", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?fields=-description,-priority`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks[0]).toHaveProperty("title");
+      expect(res.body.data.tasks[0]).toHaveProperty("status");
+      expect(res.body.data.tasks[0].description).toBeUndefined();
+      expect(res.body.data.tasks[0].priority).toBeUndefined();
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  // COMBINED QUERY TESTS
+  // ═══════════════════════════════════════════════════════════
+  describe("GET /api/v1/workspaces/:workSpaceId/projects/:projectId/tasks - Combined Queries", () => {
+    beforeEach(async () => {
+      const taskPromises = [];
+      for (let i = 1; i <= 20; i++) {
+        // Generate valid dates
+        const month = Math.min(10 + Math.floor(i / 5), 12); // Months 10-12
+        const day = Math.min((i % 27) + 1, 28); // Days 1-28 (safe for all months)
+
+        taskPromises.push(
+          request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+              title: `Combined Task ${i.toString().padStart(2, "0")}`,
+              status: i <= 10 ? "todo" : i <= 15 ? "in-progress" : "done",
+              priority: i % 3 === 0 ? "high" : i % 2 === 0 ? "medium" : "low",
+              dueDate: new Date(`2025-${month}-${day}`).toISOString(),
+            })
+        );
+      }
+      await Promise.all(taskPromises);
+    });
+
+    it("should filter, sort, and paginate simultaneously", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?status=todo&sort=-priority&page=1&limit=5`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBeLessThanOrEqual(5);
+      res.body.data.tasks.forEach((task) => {
+        expect(task.status).toBe("todo");
+      });
+    });
+
+    it("should combine filter, sort, pagination, and field selection", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?priority=high&sort=title&limit=3&fields=title,priority`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBeLessThanOrEqual(3);
+      res.body.data.tasks.forEach((task) => {
+        expect(task.priority).toBe("high");
+        expect(task).toHaveProperty("title");
+        expect(task.description).toBeUndefined();
+      });
+    });
+
+    it("should handle complex multi-filter with sorting", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?status=in-progress&priority=medium&sort=-createdAt`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      res.body.data.tasks.forEach((task) => {
+        expect(task.status).toBe("in-progress");
+        expect(task.priority).toBe("medium");
+      });
+    });
+
+    it("should handle all query parameters together", async () => {
+      const res = await request(app)
+        .get(
+          `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks?status=todo&priority=low&sort=title&page=1&limit=5&fields=title,status,priority`
+        )
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data.tasks.length).toBeLessThanOrEqual(5);
+      res.body.data.tasks.forEach((task) => {
+        expect(task.status).toBe("todo");
+        expect(task.priority).toBe("low");
+        expect(task).toHaveProperty("title");
+        expect(task.description).toBeUndefined();
+      });
     });
   });
 

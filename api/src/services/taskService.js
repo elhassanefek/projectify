@@ -5,9 +5,9 @@ const mongoose = require('mongoose');
 
 class TaskService {
   // Get all tasks (optionally by project)
-  async getAllTasks(projectId) {
+  async getAllTasks(projectId, queryParams) {
     const filter = projectId ? { project: projectId } : {};
-    return await TaskRepository.find(filter);
+    return await TaskRepository.findAll(filter, queryParams);
   }
   async checkExistance(id) {
     return await TaskRepository.findById(id);
