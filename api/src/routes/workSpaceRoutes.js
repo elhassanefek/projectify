@@ -26,21 +26,21 @@ router.get('/my-member', workSpaceController.getMemberWorkSpaces);
 
 // Get workspace by ID (if user is a member or admin)
 router.get(
-  '/:id',
+  '/:workSpaceId',
   workSpaceController.checkworkspaceMembership,
   workSpaceController.getWorkSpace
 );
 
 // Update workspace (only owner or admin)
 router.patch(
-  '/:id',
+  '/:workSpaceId',
   workSpaceController.checkWorkspaceOwnership,
   workSpaceController.updateWorkSpace
 );
 
 // Delete workspace (only owner or admin)
 router.delete(
-  '/:id',
+  '/:workSpaceId',
   workSpaceController.checkWorkspaceOwnership,
   workSpaceController.deleteWorkSpace
 );

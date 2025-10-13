@@ -138,5 +138,28 @@ projectSchema.pre('save', function (next) {
 
   next();
 });
+projectSchema.methods.isMember = function (userId) {
+  return this.teamMembers.some((mem) => mem.member.toString() === userId);
+};
+projectSchema.methods.getUserRole = function (userId) {
+  const member = this.teamMembers.find(
+    (mem) => mem.member.toString() === userId
+  );
+  return member ? member.role : null;
+};
+projectSchema.methods.hasRole = function (userId, requiredRole) {
+  const roleHierarchy = { viewer: 0, editor: 1, manager: 2, owner: 3 };
+  const userRole = this.getUserRole(userId);
+
+  if (!userRole) return false;
+
+  return roleHierarchy[userRole] >= roleHierarchy[requiredRole];
+};
+projectSchema.methods.canManage = function (userId) {
+  return (
+    this.owner.toString() === userId.toString() ||
+    this.hasRole(userId, 'manager')
+  );
+};
 const Project = mongoose.model('Project', projectSchema);
 module.exports = Project;

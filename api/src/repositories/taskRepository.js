@@ -1,5 +1,5 @@
 const Task = require('../models/taskModel');
-
+require('../models/commentModel');
 class TaskRepository {
   async create(data) {
     return await Task.create(data);

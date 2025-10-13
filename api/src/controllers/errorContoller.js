@@ -7,7 +7,6 @@ const handleCastErrorDB = (err) => {
 
 const handleDuplicateFieldsDB = (err) => {
   const value = err.errmsg.match(/(["'])(\\?.)*?\1/)[0];
-  console.log(value);
 
   const message = `Duplicate field value: ${value}. Please use another value!`;
   return new AppError(message, 400);
@@ -60,21 +59,27 @@ module.exports = (err, req, res, next) => {
   err.statusCode = err.statusCode || 500;
   err.status = err.status || 'error';
 
-  // Handle development and test environments the same way
-  if (
-    process.env.NODE_ENV === 'development' ||
+  if (process.env.NODE_ENV === 'development') {
+    sendErrorDev(err, res);
+  } else if (
+    process.env.NODE_ENV === 'production' ||
     process.env.NODE_ENV === 'test'
   ) {
-    sendErrorDev(err, res);
-  } else if (process.env.NODE_ENV === 'production') {
-    let error = { ...err };
+    // 🔥 FIX: Don't spread the error - work with original error object
+    let error = err;
 
-    if (error.name === 'CastError') error = handleCastErrorDB(error);
-    if (error.code === 11000) error = handleDuplicateFieldsDB(error);
-    if (error.name === 'ValidationError')
-      error = handleValidationErrorDB(error);
-    if (error.name === 'JsonWebTokenError') error = handleJWTError();
-    if (error.name === 'TokenExpiredError') error = handleJWTExpiredError();
+    // Create a new error only when we need to transform it
+    if (err.name === 'CastError') {
+      error = handleCastErrorDB(err);
+    } else if (err.code === 11000) {
+      error = handleDuplicateFieldsDB(err);
+    } else if (err.name === 'ValidationError') {
+      error = handleValidationErrorDB(err);
+    } else if (err.name === 'JsonWebTokenError') {
+      error = handleJWTError();
+    } else if (err.name === 'TokenExpiredError') {
+      error = handleJWTExpiredError();
+    }
 
     sendErrorProd(error, res);
   }

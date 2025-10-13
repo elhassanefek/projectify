@@ -89,9 +89,9 @@ describe("WorkSpace API - Authentication & Creation", () => {
         .send({
           description: "Missing name",
         })
-        .expect(500);
+        .expect(400);
 
-      expect(res.body.status).toBe("error");
+      expect(res.body.status).toBe("fail");
     });
 
     it("should create workspace with only name", async () => {
@@ -262,9 +262,9 @@ describe("WorkSpace API - Get, Update, Delete", () => {
       const res = await request(app)
         .get("/api/v1/workspaces/invalidid123")
         .set("Authorization", `Bearer ${authToken}`)
-        .expect(500);
+        .expect(400);
 
-      expect(res.body.status).toBe("error");
+      expect(res.body.status).toBe("fail");
     });
   });
 
@@ -357,9 +357,9 @@ describe("WorkSpace API - Get, Update, Delete", () => {
       const res = await request(app)
         .delete("/api/v1/workspaces/invalidid123")
         .set("Authorization", `Bearer ${authToken}`)
-        .expect(500);
+        .expect(400);
 
-      expect(res.body.status).toBe("error");
+      expect(res.body.status).toBe("fail");
     });
   });
 });

@@ -1,4 +1,5 @@
 const projectRepository = require('../repositories/projectRepository');
+const workSpaceService = require('../services/workSpaceService');
 const AppError = require('../utils/appError');
 
 class ProjectService {
@@ -12,7 +13,11 @@ class ProjectService {
 
     // Assign owner if not already set
     if (!data.owner) data.owner = userId;
+    const exists = await workSpaceService.checkExistance(data.workSpace);
 
+    if (!exists) {
+      throw new AppError('No wrokSpace found with this ID ', 404);
+    }
     const newProject = await projectRepository.create(data);
 
     await projectRepository.addProjectToWorkSpace(
@@ -39,6 +44,16 @@ class ProjectService {
   async deleteProject(id) {
     const project = await projectRepository.deleteById(id);
     if (!project) throw new AppError('No project found with this ID', 404);
+    return project;
+  }
+  async checkProjectOwnership(projectId, userId) {
+    const project = await projectRepository.findById(projectId);
+    if (!project) throw new AppError('No project found with this ID', 404);
+    if (!project.canManage(userId))
+      throw new AppError(
+        'You do not have permission to perform this action!',
+        403
+      );
     return project;
   }
 }

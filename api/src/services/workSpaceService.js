@@ -4,6 +4,9 @@ const User = require('../models/userModel');
 const AppError = require('../utils/appError');
 
 class WorkSpaceService {
+  async checkExistance(id) {
+    return await workSpaceRepository.findById(id);
+  }
   async getAllWorkSpaces() {
     return await workSpaceRepository.find({});
   }
@@ -71,6 +74,7 @@ class WorkSpaceService {
 
   async checkWorkspaceOwnership(workSpaceId, userId) {
     const workSpace = await workSpaceRepository.findById(workSpaceId);
+
     if (!workSpace) throw new AppError('No workSpace found with this ID', 404);
     if (!workSpace.canManage(userId))
       throw new AppError(

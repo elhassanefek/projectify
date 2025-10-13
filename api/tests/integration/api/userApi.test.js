@@ -72,9 +72,9 @@ describe("User API - Authentication", () => {
           password: "12345678",
           passwordConfirm: "12345678",
         })
-        .expect(500);
+        .expect(400);
 
-      expect(res.body.status).toBe("error");
+      expect(res.body.status).toBe("fail");
     });
 
     it("should not create user with mismatched passwords", async () => {
@@ -86,9 +86,9 @@ describe("User API - Authentication", () => {
           password: "12345678",
           passwordConfirm: "87654321",
         })
-        .expect(500);
+        .expect(400);
 
-      expect(res.body.status).toBe("error");
+      expect(res.body.status).toBe("fail");
     });
 
     it("should not create user with password less than 8 characters", async () => {
@@ -100,9 +100,9 @@ describe("User API - Authentication", () => {
           password: "1234567",
           passwordConfirm: "1234567",
         })
-        .expect(500);
+        .expect(400);
 
-      expect(res.body.status).toBe("error");
+      expect(res.body.status).toBe("fail");
     });
 
     it("should not create user without required fields", async () => {
@@ -111,9 +111,9 @@ describe("User API - Authentication", () => {
         .send({
           email: "test@example.com",
         })
-        .expect(500);
+        .expect(400);
 
-      expect(res.body.status).toBe("error");
+      expect(res.body.status).toBe("fail");
     });
 
     it("should not create user with invalid email format", async () => {
@@ -125,9 +125,9 @@ describe("User API - Authentication", () => {
           password: "12345678",
           passwordConfirm: "12345678",
         })
-        .expect(500);
+        .expect(400);
 
-      expect(res.body.status).toBe("error");
+      expect(res.body.status).toBe("fail");
     });
   });
 
@@ -239,9 +239,9 @@ describe("User API - Protected Routes", () => {
       const res = await request(app)
         .get("/api/v1/users/me")
         .set("Authorization", "Bearer invalidtoken123")
-        .expect(500);
+        .expect(401);
 
-      expect(res.body.status).toBe("error");
+      expect(res.body.status).toBe("fail");
     });
   });
 
@@ -375,9 +375,6 @@ describe("User API - Admin Routes", () => {
     );
     adminToken = adminRes.body.token;
     adminUserId = adminRes.body.data.user._id;
-
-    // TODO: Update admin user role to 'super-admin' in database
-    // This would require a helper function or direct DB access
   });
 
   describe("GET /api/v1/users", () => {

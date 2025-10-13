@@ -5,7 +5,7 @@ const authController = require('./../controllers/authController');
 const taskRouter = require('./taskRoutes');
 const groupRouter = require('./groupRoutes');
 const router = express.Router({ mergeParams: true });
-
+const workSpaceController = require('../controllers/workSpaceController');
 //nested routes
 router.use('/:projectId/groups', groupRouter);
 router.use('/:projectId/tasks', taskRouter);
@@ -15,10 +15,22 @@ router.use(authController.protect);
 //crud ops for projects
 
 router.get('/', projectController.getAllProjects);
-router.post('/', projectController.createProject);
+router.post(
+  '/',
+  workSpaceController.checkWorkspaceOwnership,
+  projectController.createProject
+);
 router.get('/:id', projectController.getProject);
-router.patch('/:id', projectController.updateProject);
-router.delete('/:id', projectController.deleteProject);
+router.patch(
+  '/:id',
+  projectController.checkProjectOwnership,
+  projectController.updateProject
+);
+router.delete(
+  '/:id',
+  projectController.checkProjectOwnership,
+  projectController.deleteProject
+);
 
 // router
 //   .route('/:projectId/tasks')
