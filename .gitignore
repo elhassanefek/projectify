@@ -6,7 +6,7 @@ dist/
 build/
 .DS_Store
 Thumbs.db
-
+package-lock.json
 # Logs
 logs/
 *.log
@@ -24,7 +24,7 @@ pnpm-debug.log*
 # ------------------------------------------------------------
 # ⚙️ Backend (api)
 # ------------------------------------------------------------
-api/node_modules/
+api/node_modules/*
 api/coverage/
 api/.env
 api/.env.*
