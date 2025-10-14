@@ -1,70 +1,55 @@
-# Node.js
+# ------------------------------------------------------------
+# 🧱 General
+# ------------------------------------------------------------
 node_modules/
-api/node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-package-lock.json
-yarn.lock
-.pnpm-debug.log*
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+dist/
+build/
+.DS_Store
+Thumbs.db
 
 # Logs
-logs
-*.log
 logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
-# Build output
-dist/
-build/
-tmp/
-temp/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# IDEs
+# OS + Editor files
 .vscode/
 .idea/
-*.sublime-workspace
-*.sublime-project
+*.swp
+*.swo
 
-# React
-*.env
-*.env.local
-*.env.development.local
-*.env.test.local
-*.env.production.local
-build/
-.cache/
-.eslintcache
+# ------------------------------------------------------------
+# ⚙️ Backend (api)
+# ------------------------------------------------------------
+api/node_modules/
+api/coverage/
+api/.env
+api/.env.*
+api/config.env
+api/package-lock.json
 
-# Test coverage
-coverage/
-*.lcov
+# Jest cache
+api/.jest-cache/
+api/.jest/
 
-# Misc
-*.tgz
-.pnp/
-.pnp.js
+# Temporary test DB files (if any)
+api/tests/tmp/
+api/tmp/
 
-# Optional npm cache directory
-.npm/
+# ------------------------------------------------------------
+# 🧩 Future frontend (if you add one later)
+# ------------------------------------------------------------
+frontend/node_modules/
+frontend/.env
+frontend/dist/
+frontend/build/
 
-# Optional eslint cache
-.eslintcache
-
-# Optional stylelint cache
-.stylelintcache
-
-# Optional REACT Native
-.expo/
+# ------------------------------------------------------------
+# 🚀 Git + misc
+# ------------------------------------------------------------
+.env
+.env.*
+!.env.example
