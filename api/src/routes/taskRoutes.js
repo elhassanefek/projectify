@@ -17,7 +17,7 @@ router
   .route('/:id')
   .get(taskController.getTask)
   .patch(taskController.updateTask)
-  .delete(taskController.delete);
+  .delete(taskController.deleteTask);
 
 router.get('/stats/by-user', taskController.getTasksByUser);
 module.exports = router;

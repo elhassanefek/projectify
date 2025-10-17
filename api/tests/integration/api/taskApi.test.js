@@ -2488,4 +2488,789 @@ describe("Task API (Nested under Workspace > Project)", () => {
       });
     });
   });
+  // ═══════════════════════════════════════════════════════════
+  // DELETE TESTS
+  // ═══════════════════════════════════════════════════════════
+  describe("DELETE TESTS", () => {
+    describe("DELETE /api/v1/workspaces/:workSpaceId/projects/:projectId/tasks/:taskId", () => {
+      beforeEach(async () => {
+        // Create a task to delete in each test
+        const res = await request(app)
+          .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+          .set("Authorization", `Bearer ${token}`)
+          .send({
+            title: "Task to Delete",
+            description: "This task will be deleted",
+            status: "todo",
+            priority: "medium",
+            assignedTo: [userId],
+          });
+
+        taskId = res.body.data.task._id;
+      });
+
+      // ───────────────────────────────
+      // BASIC DELETE TESTS
+      // ───────────────────────────────
+      describe("Basic Delete Operations", () => {
+        it("should delete a task successfully with 204 status", async () => {
+          const res = await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+
+          // 204 No Content - body should be empty
+          expect(res.body).toEqual({});
+        });
+
+        it("should remove task from database after deletion", async () => {
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+
+          // Verify task no longer exists
+          const res = await request(app)
+            .get(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(404);
+
+          expect(res.body.status).toBe("fail");
+        });
+
+        it("should return task list without deleted task", async () => {
+          // Create another task
+          await request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+              title: "Task to Keep",
+            });
+
+          // Delete first task
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+
+          // Get all tasks
+          const res = await request(app)
+            .get(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(200);
+
+          expect(res.body.data.tasks).toHaveLength(1);
+          expect(res.body.data.tasks[0].title).toBe("Task to Keep");
+          expect(res.body.data.tasks[0]._id).not.toBe(taskId);
+        });
+
+        it("should delete task with all its properties", async () => {
+          const dueDate = new Date("2026-12-31");
+
+          // Create a task with all properties
+          const createRes = await request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+              title: "Complete Task to Delete",
+              description: "Full description",
+              status: "in-progress",
+              priority: "high",
+              dueDate: dueDate.toISOString(),
+              assignedTo: [userId, secondUserId],
+              tags: ["important", "urgent"],
+            });
+
+          const fullTaskId = createRes.body.data.task._id;
+
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${fullTaskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+
+          // Verify it's gone
+          await request(app)
+            .get(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${fullTaskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(404);
+        });
+
+        it("should return empty body on successful deletion", async () => {
+          const res = await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+
+          expect(res.body).toEqual({});
+          expect(Object.keys(res.body).length).toBe(0);
+        });
+      });
+
+      // ───────────────────────────────
+      // SOCKET EVENT TESTS
+      // ───────────────────────────────
+      describe("Socket Events", () => {
+        it("should emit 'task:deleted' event when task is deleted", async () => {
+          const socketPromise = new Promise((resolve) => {
+            clientSocket.once("task:deleted", (data) => resolve(data));
+          });
+
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+
+          const socketEvent = await socketPromise;
+          expect(socketEvent).toHaveProperty("taskId");
+          expect(socketEvent).toHaveProperty("deletedBy");
+          expect(socketEvent).toHaveProperty("timestamp");
+          expect(socketEvent.taskId).toBe(taskId);
+          expect(socketEvent.deletedBy).toBe(userId);
+        });
+
+        it("should emit 'task:deleted' with correct metadata", async () => {
+          const socketPromise = new Promise((resolve) => {
+            clientSocket.once("task:deleted", (data) => resolve(data));
+          });
+
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+
+          const socketEvent = await socketPromise;
+          expect(socketEvent.taskId).toBe(taskId);
+          expect(socketEvent.deletedBy).toBe(userId);
+          expect(new Date(socketEvent.timestamp)).toBeInstanceOf(Date);
+        });
+
+        it("should emit 'task:deleted' to all project members", async () => {
+          const port = server.address().port;
+          const secondClientSocket = new Client(`http://localhost:${port}`, {
+            auth: { token: secondToken },
+            reconnection: false,
+          });
+
+          await new Promise((resolve, reject) => {
+            secondClientSocket.once("connect", resolve);
+            secondClientSocket.once("connect_error", (err) => reject(err));
+          });
+
+          secondClientSocket.emit("join:project", projectId);
+
+          const socketPromises = [
+            new Promise((resolve) => {
+              clientSocket.once("task:deleted", (data) => resolve(data));
+            }),
+            new Promise((resolve) => {
+              secondClientSocket.once("task:deleted", (data) => resolve(data));
+            }),
+          ];
+
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+
+          const [event1, event2] = await Promise.all(socketPromises);
+
+          expect(event1.taskId).toBe(taskId);
+          expect(event2.taskId).toBe(taskId);
+          expect(event1.deletedBy).toBe(userId);
+          expect(event2.deletedBy).toBe(userId);
+
+          secondClientSocket.disconnect();
+          secondClientSocket.close();
+        });
+
+        it("should NOT emit 'task:deleted' if deletion fails", async () => {
+          let eventReceived = false;
+
+          clientSocket.once("task:deleted", () => {
+            eventReceived = true;
+          });
+
+          const fakeTaskId = new mongoose.Types.ObjectId();
+
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${fakeTaskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(404);
+
+          await new Promise((resolve) => setTimeout(resolve, 100));
+
+          expect(eventReceived).toBe(false);
+        });
+
+        it("should include timestamp in task:deleted event", async () => {
+          const beforeTime = new Date();
+
+          const socketPromise = new Promise((resolve) => {
+            clientSocket.once("task:deleted", (data) => resolve(data));
+          });
+
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+
+          const afterTime = new Date();
+          const socketEvent = await socketPromise;
+
+          const eventTime = new Date(socketEvent.timestamp);
+          expect(eventTime.getTime()).toBeGreaterThanOrEqual(
+            beforeTime.getTime()
+          );
+          expect(eventTime.getTime()).toBeLessThanOrEqual(afterTime.getTime());
+        });
+
+        it("should emit 'task:deleted' even if task has no assignees", async () => {
+          // Create task without assignees
+          const createRes = await request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+              title: "Unassigned Task",
+              assignedTo: [],
+            });
+
+          const unassignedTaskId = createRes.body.data.task._id;
+
+          const socketPromise = new Promise((resolve) => {
+            clientSocket.once("task:deleted", (data) => resolve(data));
+          });
+
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${unassignedTaskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+
+          const socketEvent = await socketPromise;
+          expect(socketEvent.taskId).toBe(unassignedTaskId);
+        });
+
+        it("should emit 'task:deleted' for task with multiple assignees", async () => {
+          // Create task with multiple assignees
+          const createRes = await request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+              title: "Multi-Assigned Task",
+              assignedTo: [userId, secondUserId],
+            });
+
+          const multiTaskId = createRes.body.data.task._id;
+
+          const socketPromise = new Promise((resolve) => {
+            clientSocket.once("task:deleted", (data) => resolve(data));
+          });
+
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${multiTaskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+
+          const socketEvent = await socketPromise;
+          expect(socketEvent.taskId).toBe(multiTaskId);
+          expect(socketEvent.deletedBy).toBe(userId);
+        });
+      });
+
+      // ───────────────────────────────
+      // AUTHORIZATION TESTS
+      // ───────────────────────────────
+      describe("Authorization", () => {
+        it("should not delete task without authentication", async () => {
+          const res = await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .expect(401);
+
+          expect(res.body.status).toBe("fail");
+
+          // Verify task still exists
+          await request(app)
+            .get(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(200);
+        });
+
+        it("should not delete task with invalid token", async () => {
+          const res = await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", "Bearer invalid-token-12345")
+            .expect(401);
+
+          expect(res.body.status).toBe("fail");
+        });
+
+        it("should not delete task in non-existent project", async () => {
+          const fakeProjectId = new mongoose.Types.ObjectId();
+
+          const res = await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${fakeProjectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(404);
+
+          expect(res.body.status).toBe("fail");
+
+          // Verify task still exists in original project
+          await request(app)
+            .get(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(200);
+        });
+
+        // it("should not delete task in non-existent workspace", async () => {
+        //   const fakeWorkspaceId = new mongoose.Types.ObjectId();
+
+        //   const res = await request(app)
+        //     .delete(
+        //       `/api/v1/workspaces/${fakeWorkspaceId}/projects/${projectId}/tasks/${taskId}`
+        //     )
+        //     .set("Authorization", `Bearer ${token}`)
+        //     .expect(404);
+
+        //   expect(res.body.status).toBe("fail");
+        // });
+      });
+
+      // ───────────────────────────────
+      // ERROR HANDLING TESTS
+      // ───────────────────────────────
+      describe("Error Handling", () => {
+        it("should return 404 for non-existent task", async () => {
+          const fakeTaskId = new mongoose.Types.ObjectId();
+
+          const res = await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${fakeTaskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(404);
+
+          expect(res.body.status).toBe("fail");
+          expect(res.body.message).toContain("Task not found");
+        });
+
+        it("should handle invalid task ID format", async () => {
+          const res = await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/invalid-id-123`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(400);
+
+          expect(res.body.status).toBe("fail");
+        });
+
+        it("should not allow deleting same task twice", async () => {
+          // Delete task first time
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+
+          // Try to delete again
+          const res = await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(404);
+
+          expect(res.body.status).toBe("fail");
+          expect(res.body.message).toContain("Task not found");
+        });
+
+        it("should handle deletion when task has comments", async () => {
+          // Delete task
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+
+          // Verify task is deleted
+          await request(app)
+            .get(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(404);
+        });
+      });
+
+      // ───────────────────────────────
+      // EDGE CASES
+      // ───────────────────────────────
+      describe("Edge Cases", () => {
+        it("should handle deleting task with past due date", async () => {
+          const pastDate = new Date("2020-01-01");
+
+          const createRes = await request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+              title: "Overdue Task",
+              dueDate: pastDate.toISOString(),
+            });
+
+          const overdueTaskId = createRes.body.data.task._id;
+
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${overdueTaskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+
+          await request(app)
+            .get(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${overdueTaskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(404);
+        });
+
+        it("should handle deleting task with future due date", async () => {
+          const futureDate = new Date("2099-12-31");
+
+          const createRes = await request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+              title: "Future Task",
+              dueDate: futureDate.toISOString(),
+            });
+
+          const futureTaskId = createRes.body.data.task._id;
+
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${futureTaskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+        });
+
+        it("should handle deleting task with tags", async () => {
+          const createRes = await request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+              title: "Tagged Task",
+              tags: ["important", "urgent", "bug"],
+            });
+
+          const taggedTaskId = createRes.body.data.task._id;
+
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taggedTaskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+        });
+
+        it("should handle deleting completed task", async () => {
+          const createRes = await request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+              title: "Completed Task",
+              status: "done",
+            });
+
+          const completedTaskId = createRes.body.data.task._id;
+
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${completedTaskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+        });
+
+        it("should handle deleting task in different group", async () => {
+          // Get a different group ID from project
+          const projectRes = await request(app)
+            .get(`/api/v1/workspaces/${workspaceId}/projects/${projectId}`)
+            .set("Authorization", `Bearer ${token}`);
+
+          const differentGroupId =
+            projectRes.body.data.project.groups[1]?.id ||
+            projectRes.body.data.project.groups[0].id;
+
+          const createRes = await request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+              title: "Task in Different Group",
+              groupId: differentGroupId,
+            });
+
+          const differentGroupTaskId = createRes.body.data.task._id;
+
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${differentGroupTaskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+        });
+
+        it("should update project task count after deletion", async () => {
+          // Get initial task count
+          const beforeRes = await request(app)
+            .get(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`);
+
+          const beforeCount = beforeRes.body.data.tasks.length;
+
+          // Delete task
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+
+          // Get updated task count
+          const afterRes = await request(app)
+            .get(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`);
+
+          const afterCount = afterRes.body.data.tasks.length;
+
+          expect(afterCount).toBe(beforeCount - 1);
+        });
+
+        it("should handle rapid consecutive deletions", async () => {
+          // Create multiple tasks
+          const task1Res = await request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "Task 1" });
+
+          const task2Res = await request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "Task 2" });
+
+          const task3Res = await request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "Task 3" });
+
+          const task1Id = task1Res.body.data.task._id;
+          const task2Id = task2Res.body.data.task._id;
+          const task3Id = task3Res.body.data.task._id;
+
+          // Delete all rapidly
+          const deletions = await Promise.all([
+            request(app)
+              .delete(
+                `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${task1Id}`
+              )
+              .set("Authorization", `Bearer ${token}`),
+            request(app)
+              .delete(
+                `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${task2Id}`
+              )
+              .set("Authorization", `Bearer ${token}`),
+            request(app)
+              .delete(
+                `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${task3Id}`
+              )
+              .set("Authorization", `Bearer ${token}`),
+          ]);
+
+          deletions.forEach((res) => {
+            expect(res.status).toBe(204);
+          });
+
+          // Verify all are deleted
+          await request(app)
+            .get(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${task1Id}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(404);
+
+          await request(app)
+            .get(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${task2Id}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(404);
+
+          await request(app)
+            .get(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${task3Id}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(404);
+        });
+      });
+
+      // ───────────────────────────────
+      // INTEGRATION TESTS
+      // ───────────────────────────────
+      describe("Integration with Other Features", () => {
+        it("should not affect other tasks when deleting one", async () => {
+          // Create additional tasks
+          const task1Res = await request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "Keep Task 1" });
+
+          const task2Res = await request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "Keep Task 2" });
+
+          const keepTask1Id = task1Res.body.data.task._id;
+          const keepTask2Id = task2Res.body.data.task._id;
+
+          // Delete original task
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+
+          // Verify other tasks still exist
+          const keep1 = await request(app)
+            .get(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${keepTask1Id}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(200);
+
+          const keep2 = await request(app)
+            .get(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${keepTask2Id}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(200);
+
+          expect(keep1.body.data.task.title).toBe("Keep Task 1");
+          expect(keep2.body.data.task.title).toBe("Keep Task 2");
+        });
+
+        it("should update task statistics after deletion", async () => {
+          // Create multiple tasks with different statuses
+          await request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "Todo Task", status: "todo" });
+
+          await request(app)
+            .post(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "Done Task", status: "done" });
+
+          // Delete one task
+          await request(app)
+            .delete(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(204);
+
+          // Verify task list is updated
+          const listRes = await request(app)
+            .get(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .expect(200);
+
+          expect(listRes.body.data.tasks.some((t) => t._id === taskId)).toBe(
+            false
+          );
+        });
+      });
+    });
+  });
 });

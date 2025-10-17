@@ -70,8 +70,8 @@ exports.deleteTask = catchAsync(async (req, res, next) => {
   if (!deletedTask) return next(new AppError('Task not found', 404));
 
   res.status(204).json({
-    status: 'success',
-    data: null,
+    // status: 'success',
+    // data: null,
   });
 });
 // ------------------ Get tasks by project ------------------
