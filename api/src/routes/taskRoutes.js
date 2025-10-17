@@ -13,7 +13,11 @@ router
   .get(taskController.getAllTasks)
   .post(taskController.createTask);
 
-router.route('/:id').get(taskController.getTask);
+router
+  .route('/:id')
+  .get(taskController.getTask)
+  .patch(taskController.updateTask)
+  .delete(taskController.delete);
 
 router.get('/stats/by-user', taskController.getTasksByUser);
 module.exports = router;

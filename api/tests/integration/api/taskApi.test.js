@@ -1,11 +1,16 @@
 const request = require("supertest");
 const mongoose = require("mongoose");
+const { io: Client } = require("socket.io-client");
+const http = require("http");
+const socketConfig = require("../../../src/config/socket");
 const app = require("../../../src/app");
+const jwt = require("jsonwebtoken");
 const {
   connectTestDB,
   clearDB,
   disconnectTestDB,
 } = require("../../helpers/testDbHelper");
+const { resolve } = require("path");
 
 let token;
 let userId;
@@ -14,22 +19,41 @@ let projectId;
 let taskId;
 let secondUserId;
 let secondToken;
+let server;
+let clientSocket;
 
 beforeAll(async () => {
   await connectTestDB();
+
+  // Create HTTP + Socket server
+  server = http.createServer(app);
+  socketConfig.initialize(server);
+
+  // Start listening and connect socket client (unauthenticated for now)
+  await new Promise((resolve) => {
+    server.listen(() => {
+      resolve();
+    });
+  });
 }, 30000);
 
 afterEach(async () => {
+  if (clientSocket && clientSocket.connect) clientSocket.disconnect();
   await clearDB();
 });
 
 afterAll(async () => {
+  if (clientSocket) clientSocket.close();
+  if (server)
+    await new Promise((resolve) => {
+      server.close(resolve);
+    });
   await disconnectTestDB();
 });
 
 describe("Task API (Nested under Workspace > Project)", () => {
   beforeEach(async () => {
-    // 1️⃣ Create and login first user
+    // 1️ Create and login first user
     const signupRes = await request(app).post("/api/v1/users/signup").send({
       name: "Test User",
       email: "testuser@example.com",
@@ -39,8 +63,19 @@ describe("Task API (Nested under Workspace > Project)", () => {
 
     token = signupRes.body.token;
     userId = signupRes.body.data.user._id;
+    const port = server.address().port;
 
-    // 2️⃣ Create second user for assignment tests
+    clientSocket = new Client(`http://localhost:${port}`, {
+      auth: { token }, // real token
+      reconnection: false,
+    });
+
+    await new Promise((resolve, reject) => {
+      clientSocket.once("connect", resolve);
+      clientSocket.once("connect_error", (err) => reject(err));
+    });
+
+    // 2 Create second user
     const secondUserRes = await request(app).post("/api/v1/users/signup").send({
       name: "Second User",
       email: "seconduser@example.com",
@@ -51,7 +86,7 @@ describe("Task API (Nested under Workspace > Project)", () => {
     secondToken = secondUserRes.body.token;
     secondUserId = secondUserRes.body.data.user._id;
 
-    // 3️⃣ Create a workspace
+    // 3️ Create a workspace
     const wsRes = await request(app)
       .post("/api/v1/workspaces")
       .set("Authorization", `Bearer ${token}`)
@@ -61,8 +96,9 @@ describe("Task API (Nested under Workspace > Project)", () => {
       });
 
     workspaceId = wsRes.body.data.workSpace._id;
+    clientSocket.emit("join:workspace", workspaceId);
 
-    // 4️⃣ Create a project with groups
+    // 4️ Create a project
     const projectRes = await request(app)
       .post(`/api/v1/workspaces/${workspaceId}/projects`)
       .set("Authorization", `Bearer ${token}`)
@@ -72,12 +108,343 @@ describe("Task API (Nested under Workspace > Project)", () => {
       });
 
     projectId = projectRes.body.data.project._id;
+    clientSocket.emit("join:project", projectId);
   });
-
   // ═══════════════════════════════════════════════════════════
   // CREATE TESTS
   // ═══════════════════════════════════════════════════════════
   describe("POST /api/v1/workspaces/:workSpaceId/projects/:projectId/tasks", () => {
+    describe("Socket Events", () => {
+      it("should create a new task and emit 'task:created' event", async () => {
+        const socketPromise = new Promise((resolve) => {
+          clientSocket.once("task:created", (data) => {
+            resolve(data);
+          });
+        });
+
+        const res = await request(app)
+          .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+          .set("Authorization", `Bearer ${token}`)
+          .send({
+            title: "Socket Event Task",
+            description: "This triggers a socket event",
+            status: "todo",
+            priority: "high",
+          })
+          .expect(201);
+
+        expect(res.body.status).toBe("success");
+
+        const socketEvent = await socketPromise;
+        expect(socketEvent.task).toBeDefined();
+        expect(socketEvent.task.title).toBe("Socket Event Task");
+        expect(socketEvent.task.project).toBe(projectId);
+      });
+
+      it("should emit 'task:created' with correct metadata", async () => {
+        const socketPromise = new Promise((resolve) => {
+          clientSocket.once("task:created", (data) => {
+            resolve(data);
+          });
+        });
+
+        await request(app)
+          .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+          .set("Authorization", `Bearer ${token}`)
+          .send({
+            title: "Metadata Task",
+            priority: "low",
+          })
+          .expect(201);
+
+        const socketEvent = await socketPromise;
+        expect(socketEvent).toHaveProperty("task");
+        expect(socketEvent).toHaveProperty("createdBy");
+        expect(socketEvent).toHaveProperty("timestamp");
+        expect(socketEvent.createdBy).toBe(userId);
+        expect(new Date(socketEvent.timestamp)).toBeInstanceOf(Date);
+      });
+
+      it("should emit 'task:assigned' to assigned users when task is created", async () => {
+        // Create second client socket for second user
+        const port = server.address().port;
+        const secondClientSocket = new Client(`http://localhost:${port}`, {
+          auth: { token: secondToken },
+          reconnection: false,
+        });
+
+        await new Promise((resolve, reject) => {
+          secondClientSocket.once("connect", resolve);
+          secondClientSocket.once("connect_error", (err) => reject(err));
+        });
+
+        // Join the project with second user socket
+        secondClientSocket.emit("join:project", projectId);
+
+        const assignmentPromise = new Promise((resolve) => {
+          secondClientSocket.once("task:assigned", (data) => {
+            resolve(data);
+          });
+        });
+
+        // Create task assigned to second user
+        await request(app)
+          .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+          .set("Authorization", `Bearer ${token}`)
+          .send({
+            title: "Assigned Task",
+            assignedTo: [secondUserId],
+          })
+          .expect(201);
+
+        const assignmentEvent = await assignmentPromise;
+        expect(assignmentEvent).toHaveProperty("task");
+        expect(assignmentEvent).toHaveProperty("assignedBy");
+        expect(assignmentEvent).toHaveProperty("message");
+        expect(assignmentEvent.task.title).toBe("Assigned Task");
+        expect(assignmentEvent.assignedBy).toBe(userId);
+        expect(assignmentEvent.message).toContain("You've been assigned to");
+
+        secondClientSocket.disconnect();
+        secondClientSocket.close();
+      });
+
+      it("should NOT emit 'task:assigned' to the user who created and assigned themselves", async () => {
+        let assignmentReceived = false;
+
+        clientSocket.once("task:assigned", () => {
+          assignmentReceived = true;
+        });
+
+        // Create task and assign to self
+        await request(app)
+          .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+          .set("Authorization", `Bearer ${token}`)
+          .send({
+            title: "Self Assigned Task",
+            assignedTo: [userId],
+          })
+          .expect(201);
+
+        // Wait a bit to ensure no event is emitted
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        expect(assignmentReceived).toBe(false);
+      });
+
+      it("should emit 'task:assigned' to multiple assigned users", async () => {
+        const port = server.address().port;
+        const secondClientSocket = new Client(`http://localhost:${port}`, {
+          auth: { token: secondToken },
+          reconnection: false,
+        });
+
+        await new Promise((resolve, reject) => {
+          secondClientSocket.once("connect", resolve);
+          secondClientSocket.once("connect_error", (err) => reject(err));
+        });
+
+        secondClientSocket.emit("join:project", projectId);
+
+        // Create third user
+        const thirdUserRes = await request(app)
+          .post("/api/v1/users/signup")
+          .send({
+            name: "Third User",
+            email: "thirduser@example.com",
+            password: "12345678",
+            passwordConfirm: "12345678",
+          });
+
+        const thirdToken = thirdUserRes.body.token;
+        const thirdUserId = thirdUserRes.body.data.user._id;
+
+        const thirdClientSocket = new Client(`http://localhost:${port}`, {
+          auth: { token: thirdToken },
+          reconnection: false,
+        });
+
+        await new Promise((resolve, reject) => {
+          thirdClientSocket.once("connect", resolve);
+          thirdClientSocket.once("connect_error", (err) => reject(err));
+        });
+
+        thirdClientSocket.emit("join:project", projectId);
+
+        const assignmentPromises = [
+          new Promise((resolve) => {
+            secondClientSocket.once("task:assigned", (data) => resolve(data));
+          }),
+          new Promise((resolve) => {
+            thirdClientSocket.once("task:assigned", (data) => resolve(data));
+          }),
+        ];
+
+        // Create task assigned to both users
+        await request(app)
+          .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+          .set("Authorization", `Bearer ${token}`)
+          .send({
+            title: "Multi-Assigned Task",
+            assignedTo: [secondUserId, thirdUserId],
+          })
+          .expect(201);
+
+        const [event1, event2] = await Promise.all(assignmentPromises);
+
+        expect(event1.task.title).toBe("Multi-Assigned Task");
+        expect(event2.task.title).toBe("Multi-Assigned Task");
+        expect(event1.assignedBy).toBe(userId);
+        expect(event2.assignedBy).toBe(userId);
+
+        secondClientSocket.disconnect();
+        secondClientSocket.close();
+        thirdClientSocket.disconnect();
+        thirdClientSocket.close();
+      });
+
+      it("should emit 'task:created' to all project members", async () => {
+        const port = server.address().port;
+        const secondClientSocket = new Client(`http://localhost:${port}`, {
+          auth: { token: secondToken },
+          reconnection: false,
+        });
+
+        await new Promise((resolve, reject) => {
+          secondClientSocket.once("connect", resolve);
+          secondClientSocket.once("connect_error", (err) => reject(err));
+        });
+
+        secondClientSocket.emit("join:project", projectId);
+
+        const socketPromises = [
+          new Promise((resolve) => {
+            clientSocket.once("task:created", (data) => resolve(data));
+          }),
+          new Promise((resolve) => {
+            secondClientSocket.once("task:created", (data) => resolve(data));
+          }),
+        ];
+
+        await request(app)
+          .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+          .set("Authorization", `Bearer ${token}`)
+          .send({
+            title: "Broadcast Task",
+          })
+          .expect(201);
+
+        const [event1, event2] = await Promise.all(socketPromises);
+
+        expect(event1.task.title).toBe("Broadcast Task");
+        expect(event2.task.title).toBe("Broadcast Task");
+
+        secondClientSocket.disconnect();
+        secondClientSocket.close();
+      });
+
+      it("should emit socket event even when task creation has default values", async () => {
+        const socketPromise = new Promise((resolve) => {
+          clientSocket.once("task:created", (data) => {
+            resolve(data);
+          });
+        });
+
+        await request(app)
+          .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+          .set("Authorization", `Bearer ${token}`)
+          .send({
+            title: "Default Values Task",
+          })
+          .expect(201);
+
+        const socketEvent = await socketPromise;
+        expect(socketEvent.task.status).toBe("todo");
+        expect(socketEvent.task.priority).toBe("medium");
+      });
+
+      it("should NOT emit socket event if task creation fails", async () => {
+        let eventReceived = false;
+
+        clientSocket.once("task:created", () => {
+          eventReceived = true;
+        });
+
+        // Try to create task without title (should fail)
+        await request(app)
+          .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+          .set("Authorization", `Bearer ${token}`)
+          .send({
+            description: "No title",
+          })
+          .expect(400);
+
+        // Wait to ensure no event is emitted
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        expect(eventReceived).toBe(false);
+      });
+
+      it("should include timestamp in task:created event", async () => {
+        const beforeTime = new Date();
+
+        const socketPromise = new Promise((resolve) => {
+          clientSocket.once("task:created", (data) => {
+            resolve(data);
+          });
+        });
+
+        await request(app)
+          .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+          .set("Authorization", `Bearer ${token}`)
+          .send({
+            title: "Timestamp Task",
+          })
+          .expect(201);
+
+        const afterTime = new Date();
+        const socketEvent = await socketPromise;
+
+        const eventTime = new Date(socketEvent.timestamp);
+        expect(eventTime.getTime()).toBeGreaterThanOrEqual(
+          beforeTime.getTime()
+        );
+        expect(eventTime.getTime()).toBeLessThanOrEqual(afterTime.getTime());
+      });
+
+      // it("should emit task:created event with populated task data", async () => {
+      //   const socketPromise = new Promise((resolve) => {
+      //     clientSocket.once("task:created", (data) => {
+      //       resolve(data);
+      //     });
+      //   });
+
+      //   const dueDate = new Date("2025-12-31");
+
+      //   await request(app)
+      //     .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+      //     .set("Authorization", `Bearer ${token}`)
+      //     .send({
+      //       title: "Complete Task",
+      //       description: "Full task with all fields",
+      //       status: "in-progress",
+      //       priority: "high",
+      //       assignedTo: [userId],
+      //       dueDate: dueDate.toISOString(),
+      //       tags: ["urgent", "backend"],
+      //     })
+      //     .expect(201);
+
+      //   const socketEvent = await socketPromise;
+      //   expect(socketEvent.task.title).toBe("Complete Task");
+      //   expect(socketEvent.task.description).toBe("Full task with all fields");
+      //   expect(socketEvent.task.status).toBe("in-progress");
+      //   expect(socketEvent.task.priority).toBe("high");
+      //   expect(socketEvent.task.assignedTo).toContain(userId);
+      //   expect(socketEvent.task.tags).toEqual(["urgent", "backend"]);
+      // });
+    });
+
     it("should create a new task in a project", async () => {
       const res = await request(app)
         .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
@@ -153,7 +520,9 @@ describe("Task API (Nested under Workspace > Project)", () => {
       const projectRes = await request(app)
         .get(`/api/v1/workspaces/${workspaceId}/projects/${projectId}`)
         .set("Authorization", `Bearer ${token}`);
+
       const validGroupId = projectRes.body.data.project.groups[0].id;
+
       const res = await request(app)
         .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
         .set("Authorization", `Bearer ${token}`)
@@ -166,6 +535,9 @@ describe("Task API (Nested under Workspace > Project)", () => {
       expect(res.body.data.task.groupId).toBe(validGroupId);
     });
 
+    // ───────────────────────────────
+    // ERROR CASES
+    // ───────────────────────────────
     it("should not create task without auth", async () => {
       const res = await request(app)
         .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
@@ -1329,6 +1701,791 @@ describe("Task API (Nested under Workspace > Project)", () => {
       expect(res.body.data.task.priority).toBe("high");
       expect(res.body.data.task.dueDate).toBeDefined();
       expect(res.body.data.task.assignedTo).toHaveLength(2);
+    });
+  });
+  //-----------------------------------------------------------
+  //-----------------------------------------------------------
+  // UPDATE TEESTS
+  //---------------------------------------------------------
+  describe("UPDATE TESTS", () => {
+    describe("PATCH /api/v1/workspaces/:workSpaceId/projects/:projectId/tasks/:taskId", () => {
+      beforeEach(async () => {
+        // Create a task to update in each test
+        const res = await request(app)
+          .post(`/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+          .set("Authorization", `Bearer ${token}`)
+          .send({
+            title: "Original Task",
+            description: "Original description",
+            status: "todo",
+            priority: "medium",
+            assignedTo: [userId],
+          });
+
+        taskId = res.body.data.task._id;
+      });
+
+      // ───────────────────────────────
+      // BASIC UPDATE TESTS
+      // ───────────────────────────────
+      describe("Basic Updates", () => {
+        it("should update task title", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "Updated Title" })
+            .expect(200);
+          expect(res.body.status).toBe("success");
+          expect(res.body.data.task.title).toBe("Updated Title");
+          expect(res.body.data.task._id).toBe(taskId);
+        });
+        it("should update task description", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ description: "Updated description" })
+            .expect(200);
+          expect(res.body.data.task.description).toBe("Updated description");
+        });
+        it("should update task status", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ status: "in-progress" })
+            .expect(200);
+          expect(res.body.data.task.status).toBe("in-progress");
+        });
+        it("should update task priority", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ priority: "high" })
+            .expect(200);
+          expect(res.body.data.task.priority).toBe("high");
+        });
+        it("should update task dueDate", async () => {
+          const newDueDate = new Date("2026-01-15");
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ dueDate: newDueDate.toISOString() })
+            .expect(200);
+          expect(new Date(res.body.data.task.dueDate).toISOString()).toBe(
+            newDueDate.toISOString()
+          );
+        });
+        it("should update task assignedTo array", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ assignedTo: [userId, secondUserId] });
+          expect(res.body.status).toBe("success");
+          expect(res.body.data.task.assignedTo).toHaveLength(2);
+          expect(res.body.data.task.assignedTo).toContain(userId);
+          expect(res.body.data.task.assignedTo).toContain(secondUserId);
+        });
+        it("should update task groupId", async () => {
+          // Get valid groupId from project
+          const projectRes = await request(app)
+            .get(`/api/v1/workspaces/${workspaceId}/projects/${projectId}`)
+            .set("Authorization", `Bearer ${token}`);
+          const validGroupId =
+            projectRes.body.data.project.groups[1]?.id ||
+            projectRes.body.data.project.groups[0].id;
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ groupId: validGroupId })
+            .expect(200);
+          expect(res.body.data.task.groupId).toBe(validGroupId);
+        });
+        it("should update multiple fields at once", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+              title: "Multi-Update Task",
+              description: "Multiple fields updated",
+              status: "in-progress",
+              priority: "high",
+            })
+            .expect(200);
+          expect(res.body.data.task.title).toBe("Multi-Update Task");
+          expect(res.body.data.task.description).toBe(
+            "Multiple fields updated"
+          );
+          expect(res.body.data.task.status).toBe("in-progress");
+          expect(res.body.data.task.priority).toBe("high");
+        });
+        it("should preserve fields not being updated", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "Only Title Changed" })
+            .expect(200);
+          expect(res.body.data.task.title).toBe("Only Title Changed");
+          expect(res.body.data.task.description).toBe("Original description");
+          expect(res.body.data.task.status).toBe("todo");
+          expect(res.body.data.task.priority).toBe("medium");
+        });
+        it("should update task tags", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ tags: ["urgent", "backend", "bug"] })
+            .expect(200);
+          expect(res.body.data.task.tags).toEqual(["urgent", "backend", "bug"]);
+        });
+      });
+
+      // ───────────────────────────────
+      // SOCKET EVENT TESTS
+      // ───────────────────────────────
+      describe("Socket Events", () => {
+        it("should emit 'task:updated' when task is updated", async () => {
+          const socketPromise = new Promise((resolve) => {
+            clientSocket.once("task:updated", (data) => resolve(data));
+          });
+
+          await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "Socket Update" })
+            .expect(200);
+
+          const socketEvent = await socketPromise;
+          console.log(socketEvent);
+          expect(socketEvent).toHaveProperty("task");
+          expect(socketEvent).toHaveProperty("updatedBy");
+          expect(socketEvent).toHaveProperty("changes");
+          expect(socketEvent.task.title).toBe("Socket Update");
+          expect(socketEvent.updatedBy).toBe(userId);
+        });
+
+        it("should emit 'task:updated' with correct changes object", async () => {
+          const socketPromise = new Promise((resolve) => {
+            clientSocket.once("task:updated", (data) => resolve(data));
+          });
+
+          await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+              title: "Changed Title",
+              priority: "high",
+            })
+            .expect(200);
+
+          const socketEvent = await socketPromise;
+          expect(socketEvent.changes).toHaveProperty("title");
+          expect(socketEvent.changes).toHaveProperty("priority");
+          expect(socketEvent.changes.title.old).toBe("Original Task");
+          expect(socketEvent.changes.title.new).toBe("Changed Title");
+          expect(socketEvent.changes.priority.old).toBe("medium");
+          expect(socketEvent.changes.priority.new).toBe("high");
+        });
+
+        it("should emit 'task:status_changed' when status changes", async () => {
+          const socketPromise = new Promise((resolve) => {
+            clientSocket.once("task:status_changed", (data) => resolve(data));
+          });
+
+          await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ status: "in-progress" })
+            .expect(200);
+
+          const socketEvent = await socketPromise;
+          expect(socketEvent).toHaveProperty("taskId");
+          expect(socketEvent).toHaveProperty("oldStatus");
+          expect(socketEvent).toHaveProperty("newStatus");
+          expect(socketEvent).toHaveProperty("updatedBy");
+          expect(socketEvent.taskId).toBe(taskId);
+          expect(socketEvent.oldStatus).toBe("todo");
+          expect(socketEvent.newStatus).toBe("in-progress");
+          expect(socketEvent.updatedBy).toBe(userId);
+        });
+
+        it("should emit 'task:priority_changed' when priority changes", async () => {
+          const socketPromise = new Promise((resolve) => {
+            clientSocket.once("task:priority_changed", (data) => resolve(data));
+          });
+
+          await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ priority: "low" })
+            .expect(200);
+
+          const socketEvent = await socketPromise;
+          expect(socketEvent).toHaveProperty("taskId");
+          expect(socketEvent).toHaveProperty("oldPriority");
+          expect(socketEvent).toHaveProperty("newPriority");
+          expect(socketEvent).toHaveProperty("updatedBy");
+          expect(socketEvent.taskId).toBe(taskId);
+          expect(socketEvent.oldPriority).toBe("medium");
+          expect(socketEvent.newPriority).toBe("low");
+          expect(socketEvent.updatedBy).toBe(userId);
+        });
+
+        it("should emit 'task:assigned' to newly assigned users", async () => {
+          const port = server.address().port;
+          const secondClientSocket = new Client(`http://localhost:${port}`, {
+            auth: { token: secondToken },
+            reconnection: false,
+          });
+
+          await new Promise((resolve, reject) => {
+            secondClientSocket.once("connect", resolve);
+            secondClientSocket.once("connect_error", (err) => reject(err));
+          });
+
+          secondClientSocket.emit("join:project", projectId);
+
+          const assignmentPromise = new Promise((resolve) => {
+            secondClientSocket.once("task:assigned", (data) => resolve(data));
+          });
+
+          await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ assignedTo: [userId, secondUserId] })
+            .expect(200);
+
+          const assignmentEvent = await assignmentPromise;
+          expect(assignmentEvent).toHaveProperty("task");
+          expect(assignmentEvent).toHaveProperty("assignedBy");
+          expect(assignmentEvent.task._id).toBe(taskId);
+          expect(assignmentEvent.assignedBy).toBe(userId);
+
+          secondClientSocket.disconnect();
+          secondClientSocket.close();
+        });
+
+        it("should NOT emit 'task:assigned' to already assigned users", async () => {
+          let assignmentEventReceived = false;
+
+          clientSocket.once("task:assigned", () => {
+            assignmentEventReceived = true;
+          });
+
+          await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+              assignedTo: [userId], // Same user, no new assignment
+              description: "Updated description",
+            })
+            .expect(200);
+
+          await new Promise((resolve) => setTimeout(resolve, 100));
+
+          expect(assignmentEventReceived).toBe(false);
+        });
+
+        it("should emit 'task:assigned' only to newly added users, not existing ones", async () => {
+          let firstUserAssignmentReceived = false;
+
+          clientSocket.once("task:assigned", () => {
+            firstUserAssignmentReceived = true;
+          });
+
+          const port = server.address().port;
+          const secondClientSocket = new Client(`http://localhost:${port}`, {
+            auth: { token: secondToken },
+            reconnection: false,
+          });
+
+          await new Promise((resolve, reject) => {
+            secondClientSocket.once("connect", resolve);
+            secondClientSocket.once("connect_error", (err) => reject(err));
+          });
+
+          secondClientSocket.emit("join:project", projectId);
+
+          const assignmentPromise = new Promise((resolve) => {
+            secondClientSocket.once("task:assigned", (data) => resolve(data));
+          });
+
+          await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ assignedTo: [userId, secondUserId] })
+            .expect(200);
+
+          const assignmentEvent = await assignmentPromise;
+
+          expect(firstUserAssignmentReceived).toBe(false);
+          expect(assignmentEvent.task._id).toBe(taskId);
+          expect(assignmentEvent.assignedBy).toBe(userId);
+
+          secondClientSocket.disconnect();
+          secondClientSocket.close();
+        });
+
+        it("should NOT emit 'task:assigned' to the user making the assignment", async () => {
+          let selfAssignmentReceived = false;
+
+          clientSocket.once("task:assigned", () => {
+            selfAssignmentReceived = true;
+          });
+
+          await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ assignedTo: [userId, secondUserId] })
+            .expect(200);
+
+          await new Promise((resolve) => setTimeout(resolve, 100));
+
+          expect(selfAssignmentReceived).toBe(false);
+        });
+
+        it("should emit both 'task:updated' and 'task:status-changed' when status changes", async () => {
+          const updatedPromise = new Promise((resolve) => {
+            clientSocket.once("task:updated", (data) => resolve(data));
+          });
+
+          const statusChangedPromise = new Promise((resolve) => {
+            clientSocket.once("task:status_changed", (data) => resolve(data));
+          });
+
+          await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ status: "done" })
+            .expect(200);
+
+          const [updatedEvent, statusEvent] = await Promise.all([
+            updatedPromise,
+            statusChangedPromise,
+          ]);
+
+          expect(updatedEvent.task.status).toBe("done");
+          expect(statusEvent.newStatus).toBe("done");
+          expect(statusEvent.oldStatus).toBe("todo");
+        });
+
+        it("should emit both 'task:updated' and 'task:priority-changed' when priority changes", async () => {
+          const updatedPromise = new Promise((resolve) => {
+            clientSocket.once("task:updated", (data) => resolve(data));
+          });
+
+          const priorityChangedPromise = new Promise((resolve) => {
+            clientSocket.once("task:priority_changed", (data) => resolve(data));
+          });
+
+          await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ priority: "high" })
+            .expect(200);
+
+          const [updatedEvent, priorityEvent] = await Promise.all([
+            updatedPromise,
+            priorityChangedPromise,
+          ]);
+
+          expect(updatedEvent.task.priority).toBe("high");
+          expect(priorityEvent.newPriority).toBe("high");
+          expect(priorityEvent.oldPriority).toBe("medium");
+        });
+
+        it("should emit 'task:updated' to all project members", async () => {
+          const port = server.address().port;
+          const secondClientSocket = new Client(`http://localhost:${port}`, {
+            auth: { token: secondToken },
+            reconnection: false,
+          });
+
+          await new Promise((resolve, reject) => {
+            secondClientSocket.once("connect", resolve);
+            secondClientSocket.once("connect_error", (err) => reject(err));
+          });
+
+          secondClientSocket.emit("join:project", projectId);
+
+          const socketPromises = [
+            new Promise((resolve) => {
+              clientSocket.once("task:updated", (data) => resolve(data));
+            }),
+            new Promise((resolve) => {
+              secondClientSocket.once("task:updated", (data) => resolve(data));
+            }),
+          ];
+
+          await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "Broadcast Update" })
+            .expect(200);
+
+          const [event1, event2] = await Promise.all(socketPromises);
+
+          expect(event1.task.title).toBe("Broadcast Update");
+          expect(event2.task.title).toBe("Broadcast Update");
+
+          secondClientSocket.disconnect();
+          secondClientSocket.close();
+        });
+
+        it("should NOT emit socket events if update fails", async () => {
+          let eventReceived = false;
+
+          clientSocket.once("task:updated", () => {
+            eventReceived = true;
+          });
+
+          await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ status: "invalid-status" })
+            .expect(400);
+
+          await new Promise((resolve) => setTimeout(resolve, 100));
+
+          expect(eventReceived).toBe(false);
+        });
+
+        it("should include timestamp in task:updated event", async () => {
+          const beforeTime = new Date();
+
+          const socketPromise = new Promise((resolve) => {
+            clientSocket.once("task:updated", (data) => resolve(data));
+          });
+
+          await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "Timestamp Test" })
+            .expect(200);
+
+          const afterTime = new Date();
+          const socketEvent = await socketPromise;
+
+          if (socketEvent.timestamp) {
+            const eventTime = new Date(socketEvent.timestamp);
+            expect(eventTime.getTime()).toBeGreaterThanOrEqual(
+              beforeTime.getTime()
+            );
+            expect(eventTime.getTime()).toBeLessThanOrEqual(
+              afterTime.getTime()
+            );
+          }
+        });
+      });
+
+      // ───────────────────────────────
+      // AUTHORIZATION TESTS
+      // ───────────────────────────────
+      describe("Authorization", () => {
+        it("should not update task without authentication", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .send({ title: "Unauthorized Update" })
+            .expect(401);
+
+          expect(res.body.status).toBe("fail");
+        });
+
+        it("should not update task with invalid token", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", "Bearer invalid-token-12345")
+            .send({ title: "Invalid Token Update" })
+            .expect(401);
+
+          expect(res.body.status).toBe("fail");
+        });
+
+        it("should not update task in non-existent project", async () => {
+          const fakeProjectId = new mongoose.Types.ObjectId();
+
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${fakeProjectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "Update in fake project" })
+            .expect(404);
+
+          expect(res.body.status).toBe("fail");
+        });
+      });
+
+      // ───────────────────────────────
+      // VALIDATION TESTS
+      // ───────────────────────────────
+      describe("Validation", () => {
+        it("should not update with invalid status", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ status: "invalid-status" })
+            .expect(400);
+
+          expect(res.body.status).toBe("fail");
+        });
+
+        it("should not update with invalid priority", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ priority: "urgent" })
+            .expect(400);
+
+          expect(res.body.status).toBe("fail");
+        });
+
+        // it("should not update with invalid groupId", async () => {
+        //   const res = await request(app)
+        //     .patch(
+        //       `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+        //     )
+        //     .set("Authorization", `Bearer ${token}`)
+        //     .send({ groupId: "non-existent-group-id" })
+        //     .expect(400);
+
+        //   expect(res.body.status).toBe("fail");
+        //   expect(res.body.message).toContain("Invalid groupId");
+        // });
+
+        it("should not update non-existent task", async () => {
+          const fakeTaskId = new mongoose.Types.ObjectId();
+
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${fakeTaskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "Update fake task" })
+            .expect(404);
+
+          expect(res.body.status).toBe("fail");
+          expect(res.body.message).toContain("Task not found");
+        });
+
+        it("should not update with empty title", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "" })
+            .expect(400);
+
+          expect(res.body.status).toBe("fail");
+        });
+
+        it("should not update with whitespace-only title", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "   " })
+            .expect(400);
+
+          expect(res.body.status).toBe("fail");
+        });
+
+        it("should handle invalid MongoDB ObjectId gracefully", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/invalid-id-123`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "Update" })
+            .expect(400);
+
+          expect(res.body.status).toBe("fail");
+        });
+
+        it("should not update with invalid assignedTo (non-array)", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ assignedTo: "not-an-array" })
+            .expect(400);
+
+          expect(res.body.status).toBe("fail");
+        });
+
+        it("should not update with invalid dueDate format", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ dueDate: "invalid-date" })
+            .expect(400);
+
+          expect(res.body.status).toBe("fail");
+        });
+      });
+
+      // ───────────────────────────────
+      // EDGE CASES
+      // ───────────────────────────────
+      describe("Edge Cases", () => {
+        it("should handle updating task with no changes", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({})
+            .expect(200);
+
+          expect(res.body.status).toBe("success");
+        });
+
+        it("should handle removing all assignees", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ assignedTo: [] })
+            .expect(200);
+
+          expect(res.body.data.task.assignedTo).toEqual([]);
+        });
+
+        it("should handle updating to past due date", async () => {
+          const pastDate = new Date("2020-01-01");
+
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ dueDate: pastDate.toISOString() })
+            .expect(200);
+
+          expect(new Date(res.body.data.task.dueDate)).toEqual(pastDate);
+        });
+
+        it("should handle updating to far future date", async () => {
+          const futureDate = new Date("2099-12-31");
+
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ dueDate: futureDate.toISOString() })
+            .expect(200);
+
+          expect(new Date(res.body.data.task.dueDate)).toEqual(futureDate);
+        });
+
+        it("should handle removing dueDate (set to null)", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ dueDate: null })
+            .expect(200);
+
+          expect(res.body.data.task.dueDate).toBeNull();
+        });
+
+        it("should handle updating task with very long title", async () => {
+          const longTitle = "A".repeat(500);
+
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: longTitle });
+
+          expect([200, 400]).toContain(res.status);
+        });
+
+        it("should handle updating task with whitespace in title", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ title: "  Trimmed Title  " })
+            .expect(200);
+
+          expect(res.body.data.task.title).toBe("Trimmed Title");
+        });
+
+        it("should handle removing description (set to empty)", async () => {
+          const res = await request(app)
+            .patch(
+              `/api/v1/workspaces/${workspaceId}/projects/${projectId}/tasks/${taskId}`
+            )
+            .set("Authorization", `Bearer ${token}`)
+            .send({ description: "" })
+            .expect(200);
+
+          expect(res.body.data.task.description).toBe("");
+        });
+      });
     });
   });
 });

@@ -5,7 +5,7 @@ const xss = require('xss-clean');
 const morgan = require('morgan');
 const hpp = require('hpp');
 const rateLimit = require('express-rate-limit');
-
+const cors = require('cors');
 const workSpaceRouter = require('./routes/workSpaceRoutes');
 const userRouter = require('./routes/userRoutes');
 const globalErrorHandler = require('./controllers/errorContoller');

@@ -19,6 +19,7 @@ class ProjectService {
     if (!exists) {
       throw new AppError('No wrokSpace found with this ID ', 404);
     }
+    //create the project in the dataBase
     const newProject = await projectRepository.create(data);
 
     await projectRepository.addProjectToWorkSpace(

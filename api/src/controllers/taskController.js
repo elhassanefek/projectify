@@ -44,7 +44,12 @@ exports.createTask = catchAsync(async (req, res, next) => {
 
 // ------------------ Update task ------------------
 exports.updateTask = catchAsync(async (req, res, next) => {
-  const updatedTask = await TaskService.updateTask(req.params.id, req.body);
+  const updatedTask = await TaskService.updateTask(
+    req.params.projectId,
+    req.params.id,
+    req.body,
+    req.user._id
+  );
 
   if (!updatedTask) return next(new AppError('Task not found', 404));
 
@@ -53,7 +58,22 @@ exports.updateTask = catchAsync(async (req, res, next) => {
     data: { task: updatedTask },
   });
 });
+// ----------------- Delete Task --------------------------
+exports.deleteTask = catchAsync(async (req, res, next) => {
+  const deletedTask = await TaskService.deleteTask(
+    req.params.projectId,
+    req.params.id,
 
+    req.user._id
+  );
+
+  if (!deletedTask) return next(new AppError('Task not found', 404));
+
+  res.status(204).json({
+    status: 'success',
+    data: null,
+  });
+});
 // ------------------ Get tasks by project ------------------
 exports.getTasksByProject = catchAsync(async (req, res, next) => {
   const tasks = await TaskService.getTasksByProject(req.params.projectId);
