@@ -1,46 +1,47 @@
-// src/config/socket.js
 const socketIO = require('socket.io');
 const authSocket = require('../socket/middleWares/authSocket');
+const RoomManager = require('../socket/room');
 
 class SocketConfig {
   constructor() {
     this.io = null;
+    this.roomManager = null;
     this.userSockets = new Map();
   }
 
   initialize(server, options = {}) {
     const defaultOptions = {
       cors: {
-        // origin: process.env.CLIENT_URL || 'http://localhost:3000',
-        // methods: ['GET', 'POST'],
-        // credentials: true,
-        origin: '*',
+        origin: process.env.CLIENT_URL || 'http://localhost:3000',
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        credentials: true,
       },
       pingTimeout: 60000,
       pingInterval: 25000,
     };
 
     this.io = socketIO(server, { ...defaultOptions, ...options });
+    this.roomManager = new RoomManager(this.io);
 
-    // Plug in middleware
+    // Initialize middleware
     this.setupMiddleware();
 
-    // Handle connections
+    // Set up connection handlers
     this.setupConnectionHandlers();
 
     console.log('✅ Socket.IO initialized successfully');
+
     return this.io;
   }
 
   setupMiddleware() {
-    // You can chain multiple middlewares here if needed
     this.io.use(authSocket);
   }
 
   setupConnectionHandlers() {
     this.io.on('connection', (socket) => {
       console.log(
-        `🔌 User connected: ${socket.userId} (Socket ID: ${socket.id})`
+        ` User connected: ${socket.userId} (Socket ID: ${socket.id})`
       );
 
       // Track user's socket connections
@@ -50,28 +51,40 @@ class SocketConfig {
       this.userSockets.get(socket.userId).add(socket.id);
 
       // Auto-join user-specific room
-      socket.join(`user:${socket.userId}`);
+      const userRoom = RoomManager.getUserRoom(socket.userId);
+      this.roomManager.joinRoom(socket, userRoom);
 
       // Workspace join/leave
       socket.on('join:workspace', (workspaceId) => {
-        socket.join(`workspace:${workspaceId}`);
-        console.log(`👥 User ${socket.userId} joined workspace:${workspaceId}`);
+        const workspaceRoom = RoomManager.getWorkspaceRoom(workspaceId);
+        this.roomManager.joinRoom(socket, workspaceRoom);
       });
 
       socket.on('leave:workspace', (workspaceId) => {
-        socket.leave(`workspace:${workspaceId}`);
-        console.log(`👋 User ${socket.userId} left workspace:${workspaceId}`);
+        const workspaceRoom = RoomManager.getWorkspaceRoom(workspaceId);
+        this.roomManager.leaveRoom(socket, workspaceRoom);
       });
 
       // Project join/leave
       socket.on('join:project', (projectId) => {
-        socket.join(`project:${projectId}`);
-        console.log(`📂 User ${socket.userId} joined project:${projectId}`);
+        const projectRoom = RoomManager.getProjectRoom(projectId);
+        this.roomManager.joinRoom(socket, projectRoom);
       });
 
       socket.on('leave:project', (projectId) => {
-        socket.leave(`project:${projectId}`);
-        console.log(`📁 User ${socket.userId} left project:${projectId}`);
+        const projectRoom = RoomManager.getProjectRoom(projectId);
+        this.roomManager.leaveRoom(socket, projectRoom);
+      });
+
+      // Task join/leave
+      socket.on('join:task', (taskId) => {
+        const taskRoom = RoomManager.getTaskRoom(taskId);
+        this.roomManager.joinRoom(socket, taskRoom);
+      });
+
+      socket.on('leave:task', (taskId) => {
+        const taskRoom = RoomManager.getTaskRoom(taskId);
+        this.roomManager.leaveRoom(socket, taskRoom);
       });
 
       // Handle disconnection
@@ -80,6 +93,10 @@ class SocketConfig {
           `❌ Disconnected: ${socket.userId} (Socket ID: ${socket.id})`
         );
 
+        // Leave all rooms through room manager
+        this.roomManager.leaveAllRooms(socket);
+
+        // Clean up user tracking
         const userSocketSet = this.userSockets.get(socket.userId);
         if (userSocketSet) {
           userSocketSet.delete(socket.id);
@@ -98,27 +115,27 @@ class SocketConfig {
   }
 
   getIO() {
-    if (!this.io)
-      throw new Error('❌ Socket.IO not initialized. Call initialize() first.');
+    if (!this.io) {
+      throw new Error('Socket.IO not initialized. Call initialize() first.');
+    }
     return this.io;
   }
 
+  // Get all sockets for a specific user
+  getUserSockets(userId) {
+    return Array.from(this.userSockets.get(userId) || []);
+  }
+
+  // Check if a user is online
   isUserOnline(userId) {
     return (
       this.userSockets.has(userId) && this.userSockets.get(userId).size > 0
     );
   }
 
-  getUserSockets(userId) {
-    return this.userSockets.get(userId) || new Set();
-  }
-
-  getOnlineUsers() {
-    return Array.from(this.userSockets.keys());
-  }
-
-  getConnectionCount() {
-    return this.io?.sockets.sockets.size || 0;
+  // Get room manager instance
+  getRoomManager() {
+    return this.roomManager;
   }
 }
 

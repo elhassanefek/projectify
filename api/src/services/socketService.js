@@ -1,13 +1,21 @@
-const socketConfig = require('../config/socket');
-
 class SocketService {
+  constructor(io, roomManager) {
+    if (!io) {
+      throw new Error('SocketService requires an io instance');
+    }
+    if (!roomManager) {
+      throw new Error('SocketService requires a roomManager instance');
+    }
+    this.io = io;
+    this.roomManager = roomManager;
+  }
+
   emitToUsers(userIds, event, data) {
     try {
-      const io = socketConfig.getIO();
       const users = Array.isArray(userIds) ? userIds : [userIds];
 
       users.forEach((userId) => {
-        io.to(`user:${userId}`).emit(event, data);
+        this.roomManager.emitToUser(userId, event, data);
       });
 
       // console.log(`📤 Emitted '${event}' to ${users.length} user(s)`);
@@ -20,8 +28,7 @@ class SocketService {
 
   emitToWorkspace(workspaceId, event, data) {
     try {
-      const io = socketConfig.getIO();
-      io.to(`workspace:${workspaceId}`).emit(event, data);
+      this.roomManager.emitToWorkspace(workspaceId, event, data);
 
       // console.log(`📤 Emitted '${event}' to workspace:${workspaceId}`);
       return { success: true, workspaceId, event };
@@ -33,8 +40,7 @@ class SocketService {
 
   emitToProject(projectId, event, data) {
     try {
-      const io = socketConfig.getIO();
-      io.to(`project:${projectId}`).emit(event, data);
+      this.roomManager.emitToProject(projectId, event, data);
 
       // console.log(`📤 Emitted '${event}' to project:${projectId}`);
       return { success: true, projectId, event };
@@ -50,8 +56,7 @@ class SocketService {
    */
   emitToAll(event, data) {
     try {
-      const io = socketConfig.getIO();
-      io.emit(event, data);
+      this.io.emit(event, data);
 
       // console.log(`📤 Emitted '${event}' to all clients`);
       return { success: true, event };
@@ -63,19 +68,24 @@ class SocketService {
 
   broadcastToProject(projectId, excludeUserId, event, data) {
     try {
-      const io = socketConfig.getIO();
-      const userSockets = socketConfig.getUserSockets(excludeUserId);
+      const userSockets = this.io.sockets.sockets;
+      const userSocketIds = Array.from(userSockets.entries())
+        .filter(([_, socket]) => socket.userId === excludeUserId)
+        .map(([id]) => id);
+
+      const projectRoom =
+        this.roomManager.constructor.getProjectRoom(projectId);
 
       // Get all sockets in project room except excluded user's sockets
-      if (userSockets.size > 0) {
-        const room = io.to(`project:${projectId}`);
-        userSockets.forEach((socketId) => {
+      if (userSocketIds.length > 0) {
+        const room = this.io.to(projectRoom);
+        userSocketIds.forEach((socketId) => {
           room.except(socketId);
         });
         room.emit(event, data);
       } else {
         // User not connected, emit to everyone
-        io.to(`project:${projectId}`).emit(event, data);
+        this.io.to(projectRoom).emit(event, data);
       }
 
       // console.log(
@@ -90,17 +100,22 @@ class SocketService {
 
   broadcastToWorkspace(workspaceId, excludeUserId, event, data) {
     try {
-      const io = socketConfig.getIO();
-      const userSockets = socketConfig.getUserSockets(excludeUserId);
+      const userSockets = this.io.sockets.sockets;
+      const userSocketIds = Array.from(userSockets.entries())
+        .filter(([_, socket]) => socket.userId === excludeUserId)
+        .map(([id]) => id);
 
-      if (userSockets.size > 0) {
-        const room = io.to(`workspace:${workspaceId}`);
-        userSockets.forEach((socketId) => {
+      const workspaceRoom =
+        this.roomManager.constructor.getWorkspaceRoom(workspaceId);
+
+      if (userSocketIds.length > 0) {
+        const room = this.io.to(workspaceRoom);
+        userSocketIds.forEach((socketId) => {
           room.except(socketId);
         });
         room.emit(event, data);
       } else {
-        io.to(`workspace:${workspaceId}`).emit(event, data);
+        this.io.to(workspaceRoom).emit(event, data);
       }
 
       // console.log(
@@ -410,20 +425,37 @@ class SocketService {
    */
 
   isUserOnline(userId) {
-    return socketConfig.isUserOnline(userId);
+    const sockets = this.io.sockets.sockets;
+    return Array.from(sockets.values()).some(
+      (socket) => socket.userId === userId
+    );
   }
 
   getOnlineUsers() {
-    return socketConfig.getOnlineUsers();
+    const sockets = this.io.sockets.sockets;
+    const userSet = new Set();
+
+    for (const socket of sockets.values()) {
+      if (socket.userId) {
+        userSet.add(socket.userId);
+      }
+    }
+
+    return Array.from(userSet);
   }
 
   getConnectionCount() {
-    return socketConfig.getConnectionCount();
+    return this.io.engine.clientsCount;
   }
 
   getUserSockets(userId) {
-    return socketConfig.getUserSockets(userId);
+    const sockets = this.io.sockets.sockets;
+    return new Map(
+      Array.from(sockets.entries()).filter(
+        ([_, socket]) => socket.userId === userId
+      )
+    );
   }
 }
 
-module.exports = new SocketService();
+module.exports = SocketService;

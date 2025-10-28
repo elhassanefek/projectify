@@ -32,13 +32,7 @@ router.delete(
   projectController.deleteProject
 );
 
-// router
-//   .route('/:projectId/tasks')
-//   .post(
-//     authController.protect,
-//     authController.restrictTo('user'),
-//     taskController.createTask
-//   );
+
 
 //stats endpoints
 // router.get('/stats', projectController.getProjectsStats);

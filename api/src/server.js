@@ -2,7 +2,9 @@
 const dotenv = require('dotenv');
 const http = require('http');
 const socketConfig = require('./config/socket');
-
+const SocketService = require('./services/socketService');
+const eventBus = require('./utils/eventBus'); // Assuming you have an event bus
+const registerEventHandlers = require('./events/registerHandlers');
 dotenv.config({ path: './config.env' });
 
 process.on('uncaughtException', (err) => {
@@ -21,6 +23,7 @@ if (process.env.NODE_ENV !== 'test') {
 
 const server = http.createServer(app);
 
+// Initialize socket configuration
 socketConfig.initialize(server, {
   cors: {
     origin: process.env.CLIENT_URL || 'http://localhost:3000',
@@ -28,8 +31,16 @@ socketConfig.initialize(server, {
     credentials: true,
   },
 });
+const io = socketConfig.getIO();
+const roomManager = socketConfig.getRoomManager();
+// Initialize SocketService with the configured io and roomManager
+const socketService = new SocketService(io, roomManager);
 
-console.log('✅ Socket.IO initialized successfully');
+// Register all socket event handlers
+registerEventHandlers(eventBus, socketService);
+// Register other handlers as needed
+// require('./socket/handlers/userHandlers')(eventBus, socketService);
+// require('./socket/handlers/workspaceHandlers')(eventBus, socketService);
 
 const PORT = process.env.PORT || 5000;
 

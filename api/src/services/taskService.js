@@ -1,11 +1,13 @@
+
 const TaskRepository = require('../repositories/taskRepository');
+const ProjectRepository = require('../repositories/projectRepository');
 const Project = require('../models/projectModel');
 const AppError = require('../utils/appError');
 const mongoose = require('mongoose');
-const socketService = require('./socketService');
-const ProjectReposiotry = require('../repositories/projectRepository');
+const eventBus = require('../events/eventBus'); 
+
 class TaskService {
-  // Get all tasks (optionally by project)
+ 
   async getAllTasks(projectId, queryParams) {
     const filter = projectId ? { project: projectId } : {};
     return await TaskRepository.findAll(filter, queryParams);
@@ -15,19 +17,20 @@ class TaskService {
     return await TaskRepository.findById(id);
   }
 
-  // Get single task
   async getTaskById(id) {
     return await TaskRepository.findById(id, ['comments']);
   }
 
-  // Create new task
+  // =============================
+  // CREATE TASK
+  // =============================
   async createTask({ projectId, userId, ...data }) {
     const project = await Project.findById(projectId);
     if (!project) throw new AppError('Project not found', 404);
 
-    // If no groupId provided but project has groups, assign first group
+    // Auto assign default group if missing
     if (!data.groupId && project.groups.length > 0) {
-      data.groupId = project.groups[0].id; // default to "To Do"
+      data.groupId = project.groups[0].id;
     }
 
     const groupExists = project.groups.some((g) => g.id === data.groupId);
@@ -41,198 +44,183 @@ class TaskService {
     // Create task in database
     const task = await TaskRepository.create(data);
 
-    // Emit socket event to all project members
-    socketService.emitTaskCreated(projectId, task, userId);
+    //  Emit event via eventBus 
+    eventBus.emitEvent('task.created', { projectId, task, createdBy: userId });
 
-    // If task is assigned to someone, notify them personally
-    if (data.assignedTo && data.assignedTo.length > 0) {
+    // If task is assigned, notify those users individually
+    if (data.assignedTo?.length) {
       data.assignedTo.forEach((assignedUserId) => {
-        // Only notify if assigned to someone else
         if (assignedUserId.toString() !== userId.toString()) {
-          socketService.emitTaskAssigned(assignedUserId, task, userId);
+          eventBus.emitEvent('task.assigned', {
+            userId: assignedUserId,
+            task,
+            assignedBy: userId,
+          });
         }
       });
     }
 
-    console.log(`✅ Task created and emitted: ${task._id}`);
+    console.log(`✅ Task created and event emitted: ${task._id}`);
     return task;
   }
 
-  // Update a task
+  // =============================
+  // UPDATE TASK
+  // =============================
   async updateTask(projectId, id, updates, userId) {
-    //check if the project exist
-    const project = await ProjectReposiotry.findById(projectId);
-    if (!project) {
-      throw new AppError('Project not found', 404);
-    }
-    // Get the existing task to detect changes
-    const existingTask = await TaskRepository.findById(id);
-    if (!existingTask) {
-      throw new AppError('Task not found', 404);
-    }
+    const project = await ProjectRepository.findById(projectId);
+    if (!project) throw new AppError('Project not found', 404);
 
-    // Update the task
+    const existingTask = await TaskRepository.findById(id);
+    if (!existingTask) throw new AppError('Task not found', 404);
 
     const updatedTask = await TaskRepository.update(id, {
       ...updates,
       updatedBy: userId,
     });
 
-    //  Detect changes
     const changes = this._detectChanges(existingTask, updatedTask);
 
-    //  Emit task updated event to project
-    socketService.emitTaskUpdated(
-      updatedTask.project.toString(),
-      updatedTask,
-      userId,
-      changes
-    );
+    //  Emit main event
+    eventBus.emitEvent('task.updated', {
+      projectId,
+      task: updatedTask,
+      updatedBy: userId,
+      changes,
+    });
 
-    // If status changed, emit specific status change event
+    // Specific sub-events for granularity
     if (changes.status) {
-      socketService.emitTaskStatusChanged(
-        updatedTask.project.toString(),
-        id,
-        changes.status.old,
-        changes.status.new,
-        userId
-      );
+      eventBus.emitEvent('task.status.changed', {
+        projectId,
+        taskId: id,
+        oldStatus: changes.status.old,
+        newStatus: changes.status.new,
+        updatedBy: userId,
+      });
     }
 
-    //  If priority changed, emit priority change event
     if (changes.priority) {
-      socketService.emitTaskPriorityChanged(
-        updatedTask.project.toString(),
-        id,
-        changes.priority.old,
-        changes.priority.new,
-        userId
-      );
+      eventBus.emitEvent('task.priority.changed', {
+        projectId,
+        taskId: id,
+        oldPriority: changes.priority.old,
+        newPriority: changes.priority.new,
+        updatedBy: userId,
+      });
     }
 
-    //  If assignee changed, notify the new assignees
     if (changes.assignedTo) {
       const newAssignees = changes.assignedTo.new || [];
       const oldAssignees = changes.assignedTo.old || [];
+      const oldIdsSet = new Set(oldAssignees.map((id) => id?.toString()));
 
-      const oldIdsSet = new Set(
-        oldAssignees
-          .filter((id) => id != null) // Remove null/undefined
-          .map((id) => id.toString())
+      const addedAssignees = newAssignees.filter(
+        (newId) => !oldIdsSet.has(newId?.toString())
       );
 
-      const addedAssignees = newAssignees
-        .filter((id) => id != null) // Remove null/undefined
-        .filter((newId) => !oldIdsSet.has(newId.toString()));
-
-      // Notify newly assigned users
       addedAssignees.forEach((assignedUserId) => {
         if (assignedUserId?.toString() !== userId?.toString()) {
-          socketService.emitTaskAssigned(assignedUserId, updatedTask, userId);
+          eventBus.emitEvent('task.assigned', {
+            userId: assignedUserId,
+            task: updatedTask,
+            assignedBy: userId,
+          });
         }
       });
     }
 
-    console.log(`✅ Task updated and emitted: ${id}`);
+    console.log(`✅ Task updated and event emitted: ${id}`);
     return updatedTask;
   }
 
-  // Delete a task
+  // =============================
+  // DELETE TASK
+  // =============================
   async deleteTask(projectId, id, userId) {
-    const project = await ProjectReposiotry.findById(projectId);
-    if (!project) {
-      throw new AppError('Project not found', 404);
-    }
-    const task = await TaskRepository.findById(id);
-    if (!task) {
-      throw new AppError('Task not found', 404);
-    }
+    const project = await ProjectRepository.findById(projectId);
+    if (!project) throw new AppError('Project not found', 404);
 
-    // Delete the task
+    const task = await TaskRepository.findById(id);
+    if (!task) throw new AppError('Task not found', 404);
+
     await TaskRepository.delete(id);
 
-    // Emit task deleted event
-    socketService.emitTaskDeleted(projectId, id, userId);
+    //  Emit event
+    eventBus.emitEvent('task.deleted', { projectId, taskId: id, deletedBy: userId });
 
-    console.log(`✅ Task deleted and emitted: ${id}`);
+    console.log(`✅ Task deleted and event emitted: ${id}`);
     return { success: true, message: 'Task deleted successfully' };
   }
 
-  // Assign task to users
+  // =============================
+  // ASSIGN TASK
+  // =============================
   async assignTask(taskId, userIds, assignedBy) {
     const task = await TaskRepository.findById(taskId);
-    if (!task) {
-      throw new AppError('Task not found', 404);
-    }
+    if (!task) throw new AppError('Task not found', 404);
 
-    // Update assignedTo field
-    const updatedTask = await TaskRepository.update(taskId, {
-      assignedTo: userIds,
-    });
+    const updatedTask = await TaskRepository.update(taskId, { assignedTo: userIds });
 
-    //  Notify each assigned user
+    // Emit per-user assignment events
     userIds.forEach((userId) => {
       if (userId.toString() !== assignedBy.toString()) {
-        socketService.emitTaskAssigned(userId, updatedTask, assignedBy);
+        eventBus.emitEvent('task.assigned', {
+          userId,
+          task: updatedTask,
+          assignedBy,
+        });
       }
     });
 
-    //  Emit update to project
-    socketService.emitTaskUpdated(
-      updatedTask.project.toString(),
-      updatedTask,
-      assignedBy,
-      { assignedTo: { old: task.assignedTo, new: userIds } }
-    );
+    // Emit general update event
+    eventBus.emitEvent('task.updated', {
+      projectId: updatedTask.project.toString(),
+      task: updatedTask,
+      updatedBy: assignedBy,
+      changes: { assignedTo: { old: task.assignedTo, new: userIds } },
+    });
 
-    console.log(`✅ Task assigned and emitted: ${taskId}`);
+    console.log(`✅ Task assigned and events emitted: ${taskId}`);
     return updatedTask;
   }
 
-  // Update task status
+  // =============================
+  // UPDATE STATUS
+  // =============================
   async updateTaskStatus(taskId, newStatus, userId) {
     const task = await TaskRepository.findById(taskId);
-    if (!task) {
-      throw new AppError('Task not found', 404);
-    }
+    if (!task) throw new AppError('Task not found', 404);
 
     const oldStatus = task.status;
+    const updatedTask = await TaskRepository.update(taskId, { status: newStatus });
 
-    // Update status
-    const updatedTask = await TaskRepository.update(taskId, {
-      status: newStatus,
-    });
-
-    //  Emit status change event
-    socketService.emitTaskStatusChanged(
-      updatedTask.project.toString(),
+    eventBus.emitEvent('task.status.changed', {
+      projectId: updatedTask.project.toString(),
       taskId,
       oldStatus,
       newStatus,
-      userId
-    );
+      updatedBy: userId,
+    });
 
-    //  Also emit general update
-    socketService.emitTaskUpdated(
-      updatedTask.project.toString(),
-      updatedTask,
-      userId,
-      { status: { old: oldStatus, new: newStatus } }
-    );
+    eventBus.emitEvent('task.updated', {
+      projectId: updatedTask.project.toString(),
+      task: updatedTask,
+      updatedBy: userId,
+      changes: { status: { old: oldStatus, new: newStatus } },
+    });
 
-    console.log(`✅ Task status updated and emitted: ${taskId}`);
+    console.log(`✅ Task status updated and events emitted: ${taskId}`);
     return updatedTask;
   }
 
-  // Move task to different group
+  // =============================
+  // MOVE TO NEW GROUP
+  // =============================
   async moveTaskToGroup(taskId, newGroupId, userId) {
     const task = await TaskRepository.findById(taskId);
-    if (!task) {
-      throw new AppError('Task not found', 404);
-    }
+    if (!task) throw new AppError('Task not found', 404);
 
-    // Verify group exists in project
     const project = await Project.findById(task.project);
     const groupExists = project.groups.some((g) => g.id === newGroupId);
     if (!groupExists) {
@@ -240,44 +228,30 @@ class TaskService {
     }
 
     const oldGroupId = task.groupId;
+    const updatedTask = await TaskRepository.update(taskId, { groupId: newGroupId });
 
-    // Update group
-    const updatedTask = await TaskRepository.update(taskId, {
-      groupId: newGroupId,
+    eventBus.emitEvent('task.updated', {
+      projectId: updatedTask.project.toString(),
+      task: updatedTask,
+      updatedBy: userId,
+      changes: { groupId: { old: oldGroupId, new: newGroupId } },
     });
 
-    // Emit task updated event
-    socketService.emitTaskUpdated(
-      updatedTask.project.toString(),
-      updatedTask,
-      userId,
-      { groupId: { old: oldGroupId, new: newGroupId } }
-    );
-
-    console.log(`✅ Task moved to new group and emitted: ${taskId}`);
+    console.log(`✅ Task moved and event emitted: ${taskId}`);
     return updatedTask;
   }
 
-  // Get all tasks in a project
-  async getTasksByProject(projectId) {
-    return await TaskRepository.find({ project: projectId });
-  }
-
-  // Get general task stats
+  // =============================
+  // STATS & AGGREGATIONS
+  // =============================
   async getTaskStats(projectId) {
     const total = await TaskRepository.count({ project: projectId });
-    const done = await TaskRepository.count({
-      project: projectId,
-      status: 'done',
-    });
+    const done = await TaskRepository.count({ project: projectId, status: 'done' });
     const inProgress = await TaskRepository.count({
       project: projectId,
       status: 'in-progress',
     });
-    const todo = await TaskRepository.count({
-      project: projectId,
-      status: 'todo',
-    });
+    const todo = await TaskRepository.count({ project: projectId, status: 'todo' });
     const overdue = await TaskRepository.count({
       project: projectId,
       dueDate: { $lt: new Date() },
@@ -285,21 +259,17 @@ class TaskService {
     });
 
     const progress = total > 0 ? Math.round((done / total) * 100) : 0;
-
     return { total, todo, inProgress, done, overdue, progress };
   }
 
-  // Aggregate tasks by group
   async getTasksByGroup(projectId) {
     const tasksByGroup = await TaskRepository.aggregate([
       { $match: { project: new mongoose.Types.ObjectId(projectId) } },
       { $group: { _id: '$groupId', count: { $sum: 1 } } },
     ]);
-
     return { projectId, tasksByGroup };
   }
 
-  // Aggregate tasks by assigned user
   async getTasksByUser(projectId) {
     return await TaskRepository.aggregate([
       { $match: { project: new mongoose.Types.ObjectId(projectId) } },
@@ -308,9 +278,7 @@ class TaskService {
         $group: {
           _id: '$assignedTo',
           totalTasks: { $sum: 1 },
-          completeTasks: {
-            $sum: { $cond: [{ $eq: ['$status', 'done'] }, 1, 0] },
-          },
+          completeTasks: { $sum: { $cond: [{ $eq: ['$status', 'done'] }, 1, 0] } },
           inProgressTasks: {
             $sum: { $cond: [{ $eq: ['$status', 'in-progress'] }, 1, 0] },
           },
@@ -340,11 +308,9 @@ class TaskService {
     ]);
   }
 
-  //helper methods
-  /**
-   * Detect changes between old and new task
-   * Returns object like: { status: { old: 'todo', new: 'done' }, ... }
-   */
+  // =============================
+  // PRIVATE HELPERS
+  // =============================
   _detectChanges(oldTask, newTask) {
     const changes = {};
     const fieldsToCheck = [
@@ -360,13 +326,8 @@ class TaskService {
     fieldsToCheck.forEach((field) => {
       const oldValue = oldTask[field];
       const newValue = newTask[field];
-
-      // Compare values (handles objects/arrays via JSON)
       if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
-        changes[field] = {
-          old: oldValue,
-          new: newValue,
-        };
+        changes[field] = { old: oldValue, new: newValue };
       }
     });
 
