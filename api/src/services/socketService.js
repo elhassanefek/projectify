@@ -135,7 +135,7 @@ class SocketService {
    */
 
   emitWorkspaceCreated(workspace, createdBy) {
-    return this.emitToUsers(createdBy, 'workspace:created', {
+    return this.emitToUsers(createdBy, 'workspace.created', {
       workspace,
       createdBy,
       timestamp: new Date(),
@@ -143,7 +143,7 @@ class SocketService {
   }
 
   emitWorkspaceUpdated(workspaceId, workspace, updatedBy) {
-    return this.emitToWorkspace(workspaceId, 'workspace:updated', {
+    return this.emitToWorkspace(workspaceId, 'workspace.updated', {
       workspace,
       updatedBy,
       timestamp: new Date(),
@@ -151,7 +151,7 @@ class SocketService {
   }
 
   emitWorkspaceDeleted(workspaceId, deletedBy) {
-    return this.emitToWorkspace(workspaceId, 'workspace:deleted', {
+    return this.emitToWorkspace(workspaceId, 'workspace.deleted', {
       workspaceId,
       deletedBy,
       timestamp: new Date(),
@@ -160,14 +160,14 @@ class SocketService {
 
   emitWorkspaceMemberAdded(workspaceId, member, addedBy) {
     // Notify the workspace
-    this.emitToWorkspace(workspaceId, 'workspace:member_added', {
+    this.emitToWorkspace(workspaceId, 'workspace.member.added', {
       member,
       addedBy,
       timestamp: new Date(),
     });
 
     // Notify the new member personally
-    return this.emitToUsers(member.userId, 'workspace:invitation', {
+    return this.emitToUsers(member.userId, 'workspace.invitation', {
       workspaceId,
       addedBy,
       timestamp: new Date(),
@@ -176,14 +176,14 @@ class SocketService {
 
   emitWorkspaceMemberRemoved(workspaceId, userId, removedBy) {
     // Notify the workspace
-    this.emitToWorkspace(workspaceId, 'workspace:member_removed', {
+    this.emitToWorkspace(workspaceId, 'workspace.member.removed', {
       userId,
       removedBy,
       timestamp: new Date(),
     });
 
     // Notify the removed member
-    return this.emitToUsers(userId, 'workspace:removed', {
+    return this.emitToUsers(userId, 'workspace.removed', {
       workspaceId,
       removedBy,
       timestamp: new Date(),
@@ -197,7 +197,7 @@ class SocketService {
    */
 
   emitProjectCreated(workspaceId, project, createdBy) {
-    return this.emitToWorkspace(workspaceId, 'project:created', {
+    return this.emitToWorkspace(workspaceId, 'project.created', {
       project,
       createdBy,
       timestamp: new Date(),
@@ -205,7 +205,7 @@ class SocketService {
   }
 
   emitProjectUpdated(projectId, project, updatedBy) {
-    return this.emitToProject(projectId, 'project:updated', {
+    return this.emitToProject(projectId, 'project.updated', {
       project,
       updatedBy,
       timestamp: new Date(),
@@ -213,7 +213,7 @@ class SocketService {
   }
 
   emitProjectDeleted(workspaceId, projectId, deletedBy) {
-    return this.emitToWorkspace(workspaceId, 'project:deleted', {
+    return this.emitToWorkspace(workspaceId, 'project.deleted', {
       projectId,
       deletedBy,
       timestamp: new Date(),
@@ -221,7 +221,7 @@ class SocketService {
   }
 
   emitProjectMemberAdded(projectId, member, addedBy) {
-    return this.emitToProject(projectId, 'project:member_added', {
+    return this.emitToProject(projectId, 'project.member.added', {
       member,
       addedBy,
       timestamp: new Date(),
@@ -229,7 +229,7 @@ class SocketService {
   }
 
   emitProjectMemberRemoved(projectId, userId, removedBy) {
-    return this.emitToProject(projectId, 'project:member_removed', {
+    return this.emitToProject(projectId, 'project.member.removed', {
       userId,
       removedBy,
       timestamp: new Date(),
@@ -243,7 +243,7 @@ class SocketService {
    */
 
   emitTaskCreated(projectId, task, createdBy) {
-    return this.emitToProject(projectId, 'task:created', {
+    return this.emitToProject(projectId, 'task.created', {
       task,
       createdBy,
       timestamp: new Date(),
@@ -251,7 +251,7 @@ class SocketService {
   }
 
   emitTaskUpdated(projectId, task, userId, changes = {}) {
-    return this.emitToProject(projectId, 'task:updated', {
+    return this.emitToProject(projectId, 'task.updated', {
       task,
       updatedBy: userId,
       changes, // e.g., { status: { old: 'todo', new: 'done' } }
@@ -260,7 +260,7 @@ class SocketService {
   }
 
   emitTaskDeleted(projectId, taskId, deletedBy) {
-    return this.emitToProject(projectId, 'task:deleted', {
+    return this.emitToProject(projectId, 'task.deleted', {
       taskId,
       deletedBy,
       timestamp: new Date(),
@@ -268,7 +268,7 @@ class SocketService {
   }
 
   emitTaskAssigned(userId, task, assignedBy) {
-    return this.emitToUsers(userId, 'task:assigned', {
+    return this.emitToUsers(userId, 'task.assigned', {
       task,
       assignedBy,
       message: `You've been assigned to: ${task.title}`,
@@ -277,7 +277,7 @@ class SocketService {
   }
 
   emitTaskStatusChanged(projectId, taskId, oldStatus, newStatus, changedBy) {
-    return this.emitToProject(projectId, 'task:status_changed', {
+    return this.emitToProject(projectId, 'task.status.changed', {
       taskId,
       oldStatus,
       newStatus,
@@ -293,7 +293,7 @@ class SocketService {
     newPriority,
     changedBy
   ) {
-    return this.emitToProject(projectId, 'task:priority_changed', {
+    return this.emitToProject(projectId, 'task.priority.changed', {
       taskId,
       oldPriority,
       newPriority,
